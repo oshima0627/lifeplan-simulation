@@ -2093,9 +2093,15 @@ export function CashflowChart({ result }: { result: LifeplanResult }) {
             width={70}
             tickFormatter={(v: number) => formatCompactYen(v)}
           />
+          {/*
+            recharts の Tooltip は formatter/labelFormatter の引数を
+            ValueType | undefined / ReactNode という緩い型で渡してくる。
+            number / string と注釈すると型エラーになるので、
+            受けは型注釈なしにして中で変換する
+          */}
           <Tooltip
-            formatter={(value: number, name: string) => [formatCompactYen(value), name]}
-            labelFormatter={(label: number) => `${label}歳`}
+            formatter={(value, name) => [formatCompactYen(Number(value ?? 0)), String(name)]}
+            labelFormatter={(label) => `${String(label)}歳`}
           />
           <Legend />
           {/* 資産ゼロの線。ここを下回った時点で計画は破綻している */}
