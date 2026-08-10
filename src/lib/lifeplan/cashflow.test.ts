@@ -52,6 +52,13 @@ describe("simulateCashflow", () => {
     expect(first.investments).toBe(5_500_000); // 500万 × 1.10
   });
 
+  it("投資は運用してから収支を足す（順序が逆だと年末に入れた分にも利回りがつく）", () => {
+    const result = simulateCashflow(BASE, { ...FLAT, returnPct: 10 });
+    // 正しい順序: 500万 × 1.10 = 550万 → 黒字200万を足して 750万
+    // 逆の順序なら (500万 + 200万) × 1.10 = 770万 になり、この期待値は落ちる
+    expect(result.rows[0].investments).toBe(7_500_000);
+  });
+
   it("赤字の年はまず貯金から取り崩す", () => {
     // 生活費が年収を100万上回る
     const sheet: HearingSheet = { ...BASE, annualLivingCost: 7_000_000 };
