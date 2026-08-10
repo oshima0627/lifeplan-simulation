@@ -1,0 +1,173 @@
+import { describe, expect, it } from "vitest";
+import { LIFE_EXPECTANCY_AGE } from "@/constants/lifeplan";
+import { simulateCashflow } from "./cashflow";
+import type { HearingSheet, ScenarioAssumption } from "./types";
+
+/** 率をすべて0にした前提。複利やインフレを排して単純な足し引きだけを検証する */
+const FLAT: ScenarioAssumption = {
+  key: "baseline",
+  label: "検証用",
+  returnPct: 0,
+  raisePct: 0,
+  inflationPct: 0,
+};
+
+/** 黒字が出る標準的なシート。年収600万・生活費400万 → 年200万の黒字 */
+const BASE: HearingSheet = {
+  currentAge: 40,
+  occupation: "employee",
+  householdNetIncome: 6_000_000,
+  annualLivingCost: 4_000_000,
+  savings: 3_000_000,
+  investments: 5_000_000,
+  retirementAge: 65,
+};
+
+describe("simulateCashflow", () => {
+  it("現在年齢から95歳までの行を生成する", () => {
+    const result = simulateCashflow(BASE, FLAT);
+    expect(result.rows).toHaveLength(LIFE_EXPECTANCY_AGE - BASE.currentAge + 1);
+    expect(result.rows[0].age).toBe(40);
+    expect(result.rows.at(-1)!.age).toBe(LIFE_EXPECTANCY_AGE);
+  });
+
+  it("黒字の年は投資が増え、貯金は変わらない", () => {
+    const result = simulateCashflow(BASE, FLAT);
+    const first = result.rows[0];
+    expect(first.balance).toBe(2_000_000);
+    expect(first.investments).toBe(7_000_000); // 500万 + 黒字200万
+    expect(first.savings).toBe(3_000_000); // 変わらない
+  });
+
+  it("貯金には利回りがつかず、投資にだけつく", () => {
+    // 収支ゼロにして運用の効果だけを見る
+    const sheet: HearingSheet = {
+      ...BASE,
+      householdNetIncome: 4_000_000,
+      annualLivingCost: 4_000_000,
+    };
+    const result = simulateCashflow(sheet, { ...FLAT, returnPct: 10 });
+    const first = result.rows[0];
+    expect(first.savings).toBe(3_000_000); // 貯金は増えない
+    expect(first.investments).toBe(5_500_000); // 500万 × 1.10
+  });
+
+  it("赤字の年はまず貯金から取り崩す", () => {
+    // 生活費が年収を100万上回る
+    const sheet: HearingSheet = { ...BASE, annualLivingCost: 7_000_000 };
+    const result = simulateCashflow(sheet, FLAT);
+    const first = result.rows[0];
+    expect(first.balance).toBe(-1_000_000);
+    expect(first.savings).toBe(2_000_000); // 300万 - 100万
+    expect(first.investments).toBe(5_000_000); // 手を付けない
+  });
+
+  it("貯金が尽きたら投資を取り崩す", () => {
+    // 年400万の赤字 → 1年目で貯金300万を使い切り、残り100万を投資から
+    const sheet: HearingSheet = { ...BASE, annualLivingCost: 10_000_000 };
+    const result = simulateCashflow(sheet, FLAT);
+    const first = result.rows[0];
+    expect(first.savings).toBe(0);
+    expect(first.investments).toBe(4_000_000); // 500万 - 100万
+  });
+
+  it("リタイア年齢以降は給与がゼロになる", () => {
+    const result = simulateCashflow(BASE, FLAT);
+    const atRetirement = result.rows.find((r) => r.age === BASE.retirementAge)!;
+    expect(atRetirement.income).toBe(0);
+    const beforeRetirement = result.rows.find((r) => r.age === BASE.retirementAge - 1)!;
+    expect(beforeRetirement.income).toBe(BASE.householdNetIncome);
+  });
+
+  it("退職金はリタイアした年に一度だけ加算される", () => {
+    const sheet: HearingSheet = { ...BASE, retirementLumpSum: 20_000_000 };
+    const result = simulateCashflow(sheet, FLAT);
+    expect(result.rows.find((r) => r.age === 65)!.income).toBe(20_000_000);
+    expect(result.rows.find((r) => r.age === 66)!.income).toBe(0);
+  });
+
+  it("年金は受給開始年齢から毎年入る", () => {
+    const sheet: HearingSheet = {
+      ...BASE,
+      pensionAnnual: 2_000_000,
+      pensionStartAge: 65,
+    };
+    const result = simulateCashflow(sheet, FLAT);
+    expect(result.rows.find((r) => r.age === 64)!.income).toBe(BASE.householdNetIncome);
+    expect(result.rows.find((r) => r.age === 65)!.income).toBe(2_000_000);
+    expect(result.rows.find((r) => r.age === 80)!.income).toBe(2_000_000);
+  });
+
+  it("年金受給開始年齢を省略すると65歳から始まる", () => {
+    const sheet: HearingSheet = { ...BASE, pensionAnnual: 2_000_000 };
+    const result = simulateCashflow(sheet, FLAT);
+    expect(result.rows.find((r) => r.age === 64)!.income).toBe(BASE.householdNetIncome);
+    expect(result.rows.find((r) => r.age === 65)!.income).toBe(2_000_000);
+  });
+
+  it("インフレ率のぶんだけ支出が毎年増える", () => {
+    const result = simulateCashflow(BASE, { ...FLAT, inflationPct: 2 });
+    expect(result.rows[0].expense).toBe(4_000_000);
+    expect(result.rows[1].expense).toBe(Math.round(4_000_000 * 1.02));
+    expect(result.rows[10].expense).toBe(Math.round(4_000_000 * 1.02 ** 10));
+  });
+
+  it("昇給率のぶんだけ給与が毎年増える", () => {
+    const result = simulateCashflow(BASE, { ...FLAT, raisePct: 3 });
+    expect(result.rows[0].income).toBe(6_000_000);
+    expect(result.rows[5].income).toBe(Math.round(6_000_000 * 1.03 ** 5));
+  });
+
+  it("教育費イベントがその年の支出に乗り、ラベルが記録される", () => {
+    const sheet: HearingSheet = { ...BASE, children: [{ age: 6, path: "public" }] };
+    const result = simulateCashflow(sheet, FLAT);
+    const first = result.rows[0];
+    expect(first.expense).toBeGreaterThan(4_000_000);
+    expect(first.events.some((e) => e.includes("小学校"))).toBe(true);
+  });
+
+  it("任意イベントもその年の支出に乗る", () => {
+    const sheet: HearingSheet = {
+      ...BASE,
+      customEvents: [{ age: 45, amount: 30_000_000, label: "住宅購入" }],
+    };
+    const result = simulateCashflow(sheet, FLAT);
+    const at45 = result.rows.find((r) => r.age === 45)!;
+    expect(at45.expense).toBe(4_000_000 + 30_000_000);
+    expect(at45.events).toContain("住宅購入");
+  });
+
+  it("資産が尽きる年齢を記録する", () => {
+    // 資産800万に対して年400万の赤字 → 2年目（41歳）の終わりに尽きる
+    const sheet: HearingSheet = { ...BASE, annualLivingCost: 10_000_000 };
+    const result = simulateCashflow(sheet, FLAT);
+    expect(result.depletionAge).toBe(42);
+  });
+
+  it("最後まで尽きなければ depletionAge は null", () => {
+    const result = simulateCashflow(BASE, FLAT);
+    expect(result.depletionAge).toBeNull();
+  });
+
+  it("枯渇後のマイナス残高には利回りを適用しない", () => {
+    const sheet: HearingSheet = { ...BASE, annualLivingCost: 10_000_000 };
+    const result = simulateCashflow(sheet, { ...FLAT, returnPct: 5 });
+    const rows = result.rows;
+    // マイナスに落ちた後は、毎年きっかり赤字額ぶんだけ減る（複利で膨らまない）
+    const negative = rows.filter((r) => r.total < 0);
+    const delta = negative[1].total - negative[0].total;
+    const delta2 = negative[2].total - negative[1].total;
+    expect(delta2).toBe(delta);
+  });
+
+  it("最終年の総資産を finalTotal に返す", () => {
+    const result = simulateCashflow(BASE, FLAT);
+    expect(result.finalTotal).toBe(result.rows.at(-1)!.total);
+  });
+
+  it("シナリオの識別子とラベルをそのまま引き継ぐ", () => {
+    const result = simulateCashflow(BASE, FLAT);
+    expect(result.key).toBe("baseline");
+    expect(result.label).toBe("検証用");
+  });
+});
