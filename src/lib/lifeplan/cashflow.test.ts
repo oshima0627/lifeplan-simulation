@@ -145,7 +145,12 @@ describe("simulateCashflow", () => {
   });
 
   it("最後まで尽きなければ depletionAge は null", () => {
-    const result = simulateCashflow(BASE, FLAT);
+    // BASE をそのまま使ってはいけない。年金も退職金も無いため
+    // リタイア後は年400万円の赤字が31年続き、79歳で必ず枯渇する
+    // （65歳時点の資産5,800万円 ÷ 年400万円 ≒ 14.5年）。
+    // 「尽きない」ことを確かめるには、それを吸収できる資産が要る
+    const sheet: HearingSheet = { ...BASE, investments: 500_000_000 };
+    const result = simulateCashflow(sheet, FLAT);
     expect(result.depletionAge).toBeNull();
   });
 
