@@ -53,7 +53,7 @@ const TEMPORARY_SHORTFALL_ONLY: HearingSheet = {
   retirementLumpSum: 2_000_000,
   pensionAnnual: 5_000_000,
   pensionStartAge: 60,
-  customEvents: [{ age: 60, amount: 15_000_000, label: "初年度の大きな出費" }],
+  customEvents: [{ id: "e1", age: 60, amount: 15_000_000, label: "初年度の大きな出費" }],
 };
 
 describe("runAllScenarios", () => {

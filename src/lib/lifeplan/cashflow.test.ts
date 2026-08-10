@@ -127,7 +127,7 @@ describe("simulateCashflow", () => {
   });
 
   it("教育費イベントがその年の支出に乗り、ラベルが記録される", () => {
-    const sheet: HearingSheet = { ...BASE, children: [{ age: 6, path: "public" }] };
+    const sheet: HearingSheet = { ...BASE, children: [{ id: "c1", age: 6, path: "public" }] };
     const result = simulateCashflow(sheet, FLAT);
     const first = result.rows[0];
     expect(first.expense).toBeGreaterThan(4_000_000);
@@ -137,7 +137,7 @@ describe("simulateCashflow", () => {
   it("任意イベントもその年の支出に乗る", () => {
     const sheet: HearingSheet = {
       ...BASE,
-      customEvents: [{ age: 45, amount: 30_000_000, label: "住宅購入" }],
+      customEvents: [{ id: "e1", age: 45, amount: 30_000_000, label: "住宅購入" }],
     };
     const result = simulateCashflow(sheet, FLAT);
     const at45 = result.rows.find((r) => r.age === 45)!;
@@ -174,7 +174,7 @@ describe("simulateCashflow", () => {
       savings: 0,
       investments: 0,
       retirementAge: 999, // 試算範囲内では退職しない
-      customEvents: [{ age: 91, amount: 20_000_000, label: "住宅購入" }],
+      customEvents: [{ id: "e1", age: 91, amount: 20_000_000, label: "住宅購入" }],
     };
     const result = simulateCashflow(sheet, FLAT);
     // 91歳・92歳は総資産がマイナスになるが、94歳以降にプラスへ回復する
@@ -196,7 +196,7 @@ describe("simulateCashflow", () => {
       savings: 0,
       investments: 0,
       retirementAge: 45,
-      customEvents: [{ age: 41, amount: 20_000_000, label: "住宅購入" }],
+      customEvents: [{ id: "e1", age: 41, amount: 20_000_000, label: "住宅購入" }],
     };
     const result = simulateCashflow(sheet, FLAT);
 
@@ -287,7 +287,7 @@ describe("インフレ調整（docs/requirements.md §5.1.1）", () => {
   it("任意イベントの費用は発生時点までインフレ率で調整される", () => {
     const sheet: HearingSheet = {
       ...BASE,
-      customEvents: [{ age: 45, amount: 30_000_000, label: "住宅購入" }],
+      customEvents: [{ id: "e1", age: 45, amount: 30_000_000, label: "住宅購入" }],
     };
     const result = simulateCashflow(sheet, { ...FLAT, inflationPct: 2 });
     const at45 = result.rows.find((r) => r.age === 45)!;
@@ -298,7 +298,7 @@ describe("インフレ調整（docs/requirements.md §5.1.1）", () => {
   });
 
   it("教育費イベントの費用も発生時点までインフレ率で調整される", () => {
-    const sheet: HearingSheet = { ...BASE, children: [{ age: 6, path: "public" }] };
+    const sheet: HearingSheet = { ...BASE, children: [{ id: "c1", age: 6, path: "public" }] };
     const flatResult = simulateCashflow(sheet, FLAT);
     const inflatedResult = simulateCashflow(sheet, { ...FLAT, inflationPct: 2 });
     // 発生は初年度（elapsed=0）なので、まずは将来年での差で確認する必要がある。

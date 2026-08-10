@@ -34,7 +34,8 @@ npm run preview      # ローカルでCloudflare配信を再現（wrangler dev�
 |---|---|
 | `src/lib/lifeplan/` | 計算エンジン（UI非依存の純粋関数・テスト必須） |
 | `src/constants/` | 寿命・3シナリオの前提値・教育費テーブル。**統計や制度が変わったらここだけ直す** |
-| `src/lib/storage.ts` | 入力内容の localStorage 保存 |
+| `src/lib/id.ts` | フォーム行（子供・任意イベント）の安定IDを採番するユーティリティ |
+| `src/lib/storage.ts` | 入力内容の localStorage 保存（スキーマ v2・v1からの移行を含む） |
 | `src/components/` | UIコンポーネント |
 | `src/app/` | ページ |
 
@@ -51,5 +52,7 @@ npm run preview      # ローカルでCloudflare配信を再現（wrangler dev�
 
 ## 現状
 
-Phase 1（フォーム入力）まで実装済み。
-Phase 2 でAIヒアリング層を載せる予定（[docs/requirements.md §3](docs/requirements.md)）。
+Phase 1（フォーム入力）と Phase 2a（保存スキーマ v2・安定ID）まで実装済み。
+Phase 2b でAIヒアリング層を載せる予定（[docs/requirements.md §3](docs/requirements.md)）。
+**Phase 2b の公開前に AI Gateway の Budget Limit を設定すること**
+（[§7.1](docs/requirements.md) に推奨値）。

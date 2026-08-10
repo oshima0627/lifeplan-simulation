@@ -394,9 +394,15 @@ export function loadSheet(): HearingSheet | null {
     const migrated = migrateV1(legacy);
     if (!migrated) return null;
 
-    // 変換できたときだけ、保存してから旧キーを消す
-    saveSheet(migrated);
-    localStorage.removeItem(LEGACY_KEY_V1);
+    // **書き込みが成功したときだけ**旧キーを消す。
+    // saveSheet は例外を握り潰すので、戻り値で成否を確かめないと
+    // 「書けていないのに唯一の控えを消す」ことになる（容量超過・
+    // プライベートブラウジングで実際に起きうる）。
+    // 書き込めなかった場合も migrated 自体は返す —— 今回のセッションでは
+    // 復元済みの内容が使え、v1 は次回のために残る
+    if (saveSheet(migrated)) {
+      localStorage.removeItem(LEGACY_KEY_V1);
+    }
     return migrated;
   } catch {
     return null;

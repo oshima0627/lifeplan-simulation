@@ -9,7 +9,7 @@ describe("buildEducationEvents", () => {
   });
 
   it("6歳の子（公立）は小学校6年ぶんのイベントを親40〜45歳に生成する", () => {
-    const events = buildEducationEvents([{ age: 6, path: "public" }], 40);
+    const events = buildEducationEvents([{ id: "c1", age: 6, path: "public" }], 40);
     const elementary = events.filter((e) => e.label.includes("小学校"));
     expect(elementary).toHaveLength(6);
     expect(elementary.map((e) => e.age)).toEqual([40, 41, 42, 43, 44, 45]);
@@ -17,18 +17,18 @@ describe("buildEducationEvents", () => {
   });
 
   it("すでに22歳の子はイベントを生成しない", () => {
-    expect(buildEducationEvents([{ age: 22, path: "private" }], 50)).toEqual([]);
+    expect(buildEducationEvents([{ id: "c1", age: 22, path: "private" }], 50)).toEqual([]);
   });
 
   it("過去の学齢ぶんは生成せず、これからの分だけを生成する", () => {
     // 16歳の子 → 高校2年ぶん（16,17歳）と大学4年ぶんだけが残っている
-    const events = buildEducationEvents([{ age: 16, path: "public" }], 45);
+    const events = buildEducationEvents([{ id: "c1", age: 16, path: "public" }], 45);
     expect(events.filter((e) => e.label.includes("小学校"))).toHaveLength(0);
     expect(events.filter((e) => e.label.includes("高校"))).toHaveLength(2);
   });
 
   it("大学入学年には入学料が別イベントとして加算される", () => {
-    const events = buildEducationEvents([{ age: 18, path: "private" }], 50);
+    const events = buildEducationEvents([{ id: "c1", age: 18, path: "private" }], 50);
     const entrance = events.filter((e) => e.label.includes("入学料"));
     expect(entrance).toHaveLength(1);
     expect(entrance[0].age).toBe(50);
@@ -36,15 +36,15 @@ describe("buildEducationEvents", () => {
   });
 
   it("大学入学前から始めれば入学料も含まれる", () => {
-    const events = buildEducationEvents([{ age: 10, path: "public" }], 40);
+    const events = buildEducationEvents([{ id: "c1", age: 10, path: "public" }], 40);
     expect(events.filter((e) => e.label.includes("入学料"))).toHaveLength(1);
   });
 
   it("複数の子供はラベルで区別される", () => {
     const events = buildEducationEvents(
       [
-        { age: 6, path: "public" },
-        { age: 9, path: "public" },
+        { id: "c1", age: 6, path: "public" },
+        { id: "c2", age: 9, path: "public" },
       ],
       40,
     );
@@ -53,16 +53,29 @@ describe("buildEducationEvents", () => {
   });
 
   it("私立は公立より総額が大きい", () => {
-    const pub = buildEducationEvents([{ age: 0, path: "public" }], 30);
-    const pri = buildEducationEvents([{ age: 0, path: "private" }], 30);
+    const pub = buildEducationEvents([{ id: "c1", age: 0, path: "public" }], 30);
+    const pri = buildEducationEvents([{ id: "c1", age: 0, path: "private" }], 30);
     const sum = (es: { amount: number }[]) => es.reduce((s, e) => s + e.amount, 0);
     expect(sum(pri)).toBeGreaterThan(sum(pub));
   });
 
   it("親が95歳を超える年のイベントは生成しない", () => {
     // 0歳の子・親90歳 → 幼稚園は親93〜95歳、小学校以降は96歳以上で範囲外
-    const events = buildEducationEvents([{ age: 0, path: "public" }], 90);
+    const events = buildEducationEvents([{ id: "c1", age: 0, path: "public" }], 90);
     expect(events.every((e) => e.age <= 95)).toBe(true);
     expect(events.filter((e) => e.label.includes("小学校"))).toHaveLength(0);
+  });
+
+  it("同じ入力なら何度呼んでも同じ出力になる（id を含めて決定的）", () => {
+    const children = [
+      { id: "c1", age: 6, path: "public" as const },
+      { id: "c2", age: 18, path: "private" as const },
+    ];
+    const first = buildEducationEvents(children, 40);
+    const second = buildEducationEvents(children, 40);
+    expect(second).toEqual(first);
+    // id 自体もランダムでないことを確認する（呼ぶたびに違う UUID だと上の toEqual は落ちるはずだが、
+    // 明示的に固定形式であることも確認しておく）
+    expect(first.every((e) => /^edu-\d+-[a-z]+-\d+(-entrance)?$/.test(e.id))).toBe(true);
   });
 });

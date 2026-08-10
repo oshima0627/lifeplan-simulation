@@ -35,13 +35,13 @@ describe("ヒアリングシートの永続化", () => {
     expect(loadSheet()).toBeNull();
   });
 
-  it("壊れたJSONが入っていても例外を投げず null を返す", () => {
-    localStorage.setItem("lifeplan.sheet.v1", "{壊れている");
+  it("壊れたJSONが入っていても例外を投げず null を返す（v1 も無い）", () => {
+    localStorage.setItem("lifeplan.sheet.v2", "{壊れている");
     expect(loadSheet()).toBeNull();
   });
 
-  it("必須項目が欠けた古いデータは null を返す", () => {
-    localStorage.setItem("lifeplan.sheet.v1", JSON.stringify({ currentAge: 40 }));
+  it("必須項目が欠けたデータは null を返す（v1 も無い）", () => {
+    localStorage.setItem("lifeplan.sheet.v2", JSON.stringify({ currentAge: 40 }));
     expect(loadSheet()).toBeNull();
   });
 
@@ -56,5 +56,180 @@ describe("ヒアリングシートの永続化", () => {
     expect(DEFAULT_SHEET.householdNetIncome).toBeGreaterThan(0);
     expect(DEFAULT_SHEET.annualLivingCost).toBeGreaterThan(0);
     expect(DEFAULT_SHEET.retirementAge).toBeGreaterThan(DEFAULT_SHEET.currentAge);
+  });
+});
+
+describe("v1 からの移行", () => {
+  beforeEach(() => {
+    installMockStorage();
+  });
+
+  /** id を持たない旧スキーマのシート */
+  const V1_SHEET = {
+    currentAge: 45,
+    occupation: "employee",
+    householdNetIncome: 7_000_000,
+    annualLivingCost: 4_200_000,
+    savings: 2_000_000,
+    investments: 8_000_000,
+    retirementAge: 62,
+    children: [
+      { age: 10, path: "public" },
+      { age: 7, path: "private" },
+    ],
+    customEvents: [{ age: 50, amount: 30_000_000, label: "住宅購入" }],
+  };
+
+  it("v1 しか無ければ読み出して v2 に変換する", () => {
+    localStorage.setItem("lifeplan.sheet.v1", JSON.stringify(V1_SHEET));
+    const loaded = loadSheet();
+    expect(loaded).not.toBeNull();
+    expect(loaded!.currentAge).toBe(45);
+    expect(loaded!.children).toHaveLength(2);
+    expect(loaded!.customEvents).toHaveLength(1);
+  });
+
+  it("移行後、すべての行がIDを持つ", () => {
+    localStorage.setItem("lifeplan.sheet.v1", JSON.stringify(V1_SHEET));
+    const loaded = loadSheet()!;
+    for (const c of loaded.children!) {
+      expect(c.id).toBeTruthy();
+    }
+    for (const e of loaded.customEvents!) {
+      expect(e.id).toBeTruthy();
+    }
+  });
+
+  it("移行後のIDは行ごとに異なる", () => {
+    localStorage.setItem("lifeplan.sheet.v1", JSON.stringify(V1_SHEET));
+    const loaded = loadSheet()!;
+    const ids = [
+      ...loaded.children!.map((c) => c.id),
+      ...loaded.customEvents!.map((e) => e.id),
+    ];
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it("移行に成功したら v2 に保存し v1 を消す", () => {
+    localStorage.setItem("lifeplan.sheet.v1", JSON.stringify(V1_SHEET));
+    loadSheet();
+    expect(localStorage.getItem("lifeplan.sheet.v2")).not.toBeNull();
+    expect(localStorage.getItem("lifeplan.sheet.v1")).toBeNull();
+  });
+
+  it("v2 があれば v1 を見にいかない", () => {
+    const v2 = { ...V1_SHEET, currentAge: 33, children: [], customEvents: [] };
+    localStorage.setItem("lifeplan.sheet.v2", JSON.stringify(v2));
+    localStorage.setItem("lifeplan.sheet.v1", JSON.stringify(V1_SHEET));
+    expect(loadSheet()!.currentAge).toBe(33);
+    // v1 は残したまま。触っていないので消してはいけない
+    expect(localStorage.getItem("lifeplan.sheet.v1")).not.toBeNull();
+  });
+
+  it("v1 が壊れていても例外を投げず、v1 を消さない", () => {
+    localStorage.setItem("lifeplan.sheet.v1", "{壊れている");
+    expect(loadSheet()).toBeNull();
+    // 消してから失敗すると復旧手段が無くなる
+    expect(localStorage.getItem("lifeplan.sheet.v1")).not.toBeNull();
+  });
+
+  it("v1 の必須項目が欠けていれば移行せず null を返す", () => {
+    localStorage.setItem("lifeplan.sheet.v1", JSON.stringify({ currentAge: 40 }));
+    expect(loadSheet()).toBeNull();
+    expect(localStorage.getItem("lifeplan.sheet.v2")).toBeNull();
+  });
+
+  it("children や customEvents が無い v1 も移行できる", () => {
+    const minimal = { ...V1_SHEET };
+    delete (minimal as Record<string, unknown>).children;
+    delete (minimal as Record<string, unknown>).customEvents;
+    localStorage.setItem("lifeplan.sheet.v1", JSON.stringify(minimal));
+    const loaded = loadSheet();
+    expect(loaded).not.toBeNull();
+    expect(loaded!.children).toBeUndefined();
+  });
+
+  it("v2 が壊れていて v1 が生きていれば、v1 から移行して復旧する（Finding 2）", () => {
+    // v1 が残っているのは「移行が完了していない」証拠。v2 が壊れているからといって
+    // null を返すと、唯一の復旧可能な控えである v1 を無視することになる
+    localStorage.setItem("lifeplan.sheet.v2", "{壊れている");
+    localStorage.setItem("lifeplan.sheet.v1", JSON.stringify(V1_SHEET));
+
+    const loaded = loadSheet();
+
+    expect(loaded).not.toBeNull();
+    expect(loaded!.currentAge).toBe(45);
+    expect(loaded!.children).toHaveLength(2);
+    // 移行後は v2 が壊れたデータから正しいデータへ上書きされ、v1 は消える
+    expect(JSON.parse(localStorage.getItem("lifeplan.sheet.v2")!).currentAge).toBe(45);
+    expect(localStorage.getItem("lifeplan.sheet.v1")).toBeNull();
+  });
+
+  it("v2 がスキーマ不一致で v1 が生きていれば、v1 から移行して復旧する（Finding 2）", () => {
+    localStorage.setItem("lifeplan.sheet.v2", JSON.stringify({ currentAge: 40 }));
+    localStorage.setItem("lifeplan.sheet.v1", JSON.stringify(V1_SHEET));
+
+    const loaded = loadSheet();
+
+    expect(loaded).not.toBeNull();
+    expect(loaded!.currentAge).toBe(45);
+  });
+
+  it("removeItem が例外を投げても、成功した移行結果は捨てない（Finding 1）", () => {
+    // v2 への書き込みはすでに成功している。後始末の removeItem が失敗しただけで
+    // null を返すと、ユーザーには「保存内容が消えた」ように見え、次の編集で
+    // 正しく移行された v2 を上書きしてしまう
+    const store = new Map<string, string>();
+    store.set("lifeplan.sheet.v1", JSON.stringify(V1_SHEET));
+    vi.stubGlobal("localStorage", {
+      getItem: (k: string) => store.get(k) ?? null,
+      setItem: (k: string, v: string) => void store.set(k, v),
+      removeItem: (k: string) => {
+        if (k === "lifeplan.sheet.v1") {
+          throw new Error("removeItem に失敗する実装");
+        }
+        store.delete(k);
+      },
+      clear: () => store.clear(),
+    });
+
+    const loaded = loadSheet();
+
+    // 返り値は移行済みのシートのまま。null になってはいけない
+    expect(loaded).not.toBeNull();
+    expect(loaded!.currentAge).toBe(45);
+    // v2 には移行結果が書き込まれている
+    expect(JSON.parse(store.get("lifeplan.sheet.v2")!).currentAge).toBe(45);
+    // v1 は removeItem が失敗したので残ったまま（実害はない。後始末が未完了なだけ）
+    expect(store.get("lifeplan.sheet.v1")).not.toBeUndefined();
+  });
+
+  it("v2 への書き込みが失敗したら v1 を消さない（唯一の控えを失わせない）", () => {
+    // 容量超過やプライベートブラウジングでは setItem だけが失敗し、
+    // removeItem は通ることがある。移行後の setItem だけを失敗させて再現する
+    const store = new Map<string, string>();
+    store.set("lifeplan.sheet.v1", JSON.stringify(V1_SHEET));
+    vi.stubGlobal("localStorage", {
+      getItem: (k: string) => store.get(k) ?? null,
+      setItem: (k: string, v: string) => {
+        if (k === "lifeplan.sheet.v2") {
+          throw new Error("QuotaExceededError");
+        }
+        store.set(k, v);
+      },
+      removeItem: (k: string) => void store.delete(k),
+      clear: () => store.clear(),
+    });
+
+    const loaded = loadSheet();
+
+    // 返り値は今回のセッションで使えるよう、移行済みの内容のまま
+    expect(loaded).not.toBeNull();
+    expect(loaded!.currentAge).toBe(45);
+    // v2 は書き込めていない
+    expect(store.get("lifeplan.sheet.v2")).toBeUndefined();
+    // v1 はまだ残っている ── ここで消していたら、次回の読み出しで
+    // v2 も v1 も無くなり、ユーザーの入力内容が完全に失われる
+    expect(store.get("lifeplan.sheet.v1")).not.toBeUndefined();
   });
 });

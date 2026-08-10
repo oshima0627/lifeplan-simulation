@@ -1,6 +1,7 @@
 "use client";
 
 import { DEFAULT_PENSION_START_AGE, LIFE_EXPECTANCY_AGE } from "@/constants/lifeplan";
+import { newRowId } from "@/lib/id";
 import type { Child, HearingSheet, LifeEvent, Occupation } from "@/lib/lifeplan/types";
 import { DerivedSummary } from "./DerivedSummary";
 import { NumberField } from "./NumberField";
@@ -197,8 +198,11 @@ export function HearingForm({
             <span className="text-sm font-medium text-slate-700">子供</span>
             <button
               type="button"
+              aria-label="子供を追加"
               className="rounded border border-slate-300 px-3 py-1 text-xs hover:bg-slate-100"
-              onClick={() => set("children", [...children, { age: 0, path: "public" }])}
+              onClick={() =>
+                set("children", [...children, { id: newRowId(), age: 0, path: "public" }])
+              }
             >
               追加
             </button>
@@ -212,7 +216,7 @@ export function HearingForm({
 
           {children.map((child, i) => (
             <div
-              key={i}
+              key={child.id}
               className="flex items-end gap-2 rounded border border-slate-200 bg-white p-3"
             >
               <div className="flex-1">
@@ -258,11 +262,13 @@ export function HearingForm({
             </span>
             <button
               type="button"
+              aria-label="大きな支出の予定を追加"
               className="rounded border border-slate-300 px-3 py-1 text-xs hover:bg-slate-100"
               onClick={() =>
                 set("customEvents", [
                   ...events,
                   {
+                    id: newRowId(),
                     // currentAge をあとから上げても既定値が範囲外にならないよう、
                     // 上限（95歳）でクランプしておく
                     age: Math.min(sheet.currentAge + 5, LIFE_EXPECTANCY_AGE),
@@ -289,7 +295,7 @@ export function HearingForm({
             const isOutOfRange = event.age < sheet.currentAge || event.age > LIFE_EXPECTANCY_AGE;
             return (
               <div
-                key={i}
+                key={event.id}
                 className={`flex flex-col gap-2 rounded border p-3 ${
                   isOutOfRange ? "border-amber-400 bg-amber-50" : "border-slate-200 bg-white"
                 }`}
