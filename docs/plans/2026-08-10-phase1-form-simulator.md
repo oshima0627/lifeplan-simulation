@@ -49,7 +49,7 @@
 ### Task 1: プロジェクト初期化
 
 **Files:**
-- Create: `package.json`, `tsconfig.json`, `next.config.ts`, `vitest.config.ts`, `postcss.config.mjs`, `eslint.config.mjs`, `wrangler.jsonc`, `.gitignore`, `src/app/layout.tsx`, `src/app/globals.css`, `src/app/page.tsx`
+- Create: `package.json`, `tsconfig.json`, `next.config.ts`, `vitest.config.mts`, `postcss.config.mjs`, `eslint.config.mjs`, `wrangler.jsonc`, `.gitignore`, `src/app/layout.tsx`, `src/app/globals.css`, `src/app/page.tsx`
 - Test: `src/lib/smoke.test.ts`
 
 **Interfaces:**
@@ -107,7 +107,9 @@ const nextConfig: NextConfig = {
 export default nextConfig;
 ```
 
-`vitest.config.ts`:
+`vitest.config.mts`（**拡張子は `.mts`**。`.ts` にすると Vite の `configLoader: 'native'` が
+ESM構文をCommonJSとして読み込もうとして警告を出す。`package.json` に `"type": "module"` を
+足す方法は Next.js 側の設定読み込みに影響しうるので採らない）:
 ```ts
 import { defineConfig } from "vitest/config";
 import path from "node:path";
