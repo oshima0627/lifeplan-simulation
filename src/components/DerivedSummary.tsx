@@ -33,7 +33,7 @@ export function DerivedSummary({ sheet }: { sheet: HearingSheet }) {
       <p className="mt-2 text-xs text-slate-500">
         {isNegative
           ? "支出が収入を上回っています。生活費の入力が実態と合っているか確認してください。"
-          : "これが毎年の積立額にあたります。実感と大きくずれていれば、生活費の入力を見直してください。"}
+          : "これは基本生活費だけを差し引いた金額で、教育費やライフイベント費は含みません。実感と大きくずれていれば、生活費の入力を見直してください。"}
       </p>
     </div>
   );

@@ -21,6 +21,13 @@ const COLORS: Record<ScenarioKey, string> = {
   pessimistic: "#dc2626",
 };
 
+/** 判定を読み上げ・代替テキスト用の短い日本語文にする */
+function describeDepletion(s: LifeplanResult["scenarios"][number]): string {
+  if (s.depletionAge !== null) return `${s.depletionAge}歳で資産が尽きる`;
+  if (s.temporaryShortfall) return "一時的に資金不足になるが95歳までに回復する";
+  return "95歳まで資産が尽きない";
+}
+
 /**
  * 3シナリオの総資産推移を重ねて描く（docs/requirements.md §5.3）。
  *
@@ -39,8 +46,16 @@ export function CashflowChart({ result }: { result: LifeplanResult }) {
     return point;
   });
 
+  const ariaLabel = `資産推移グラフ。${result.scenarios
+    .map((s) => `${s.label}シナリオは${describeDepletion(s)}`)
+    .join("、")}。`;
+
   return (
-    <div className="h-[360px] w-full rounded-lg border border-slate-200 bg-white p-4">
+    <div
+      role="img"
+      aria-label={ariaLabel}
+      className="h-[360px] w-full rounded-lg border border-slate-200 bg-white p-4"
+    >
       <ResponsiveContainer width="100%" height="100%">
         <LineChart data={data} margin={{ top: 8, right: 8, bottom: 8, left: 8 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
@@ -53,6 +68,11 @@ export function CashflowChart({ result }: { result: LifeplanResult }) {
             tick={{ fontSize: 12 }}
             width={70}
             tickFormatter={(v: number) => formatCompactYen(v)}
+            // 0円未満はモデル上「無制限に0%で借りられる」という便宜的な扱いにすぎず、
+            // 実際の予測ではない。悲観シナリオが大きくマイナスに振れると
+            // 意味のある0〜1億円帯がグラフの一部に圧縮されてしまうため、
+            // 下限を0円で固定してゼロを跨ぐ位置を常に読み取れるようにする
+            domain={[0, "auto"]}
           />
           {/*
             recharts の Tooltip は formatter/labelFormatter の引数を

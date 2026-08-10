@@ -1,7 +1,7 @@
 "use client";
 
 import { formatCompactYen } from "@/lib/format";
-import type { LifeplanResult } from "@/lib/lifeplan/types";
+import type { HearingSheet, LifeplanResult } from "@/lib/lifeplan/types";
 
 /**
  * 「資産が尽きる年」の判定（docs/requirements.md §5.3）。
@@ -9,11 +9,35 @@ import type { LifeplanResult } from "@/lib/lifeplan/types";
  * これはグラフの付属情報ではなく、このツールの主役として扱う。
  * 悲観シナリオでも尽きなければ、その計画は強い
  */
-export function DepletionVerdict({ result }: { result: LifeplanResult }) {
+export function DepletionVerdict({
+  result,
+  sheet,
+}: {
+  result: LifeplanResult;
+  sheet: HearingSheet;
+}) {
   const { scenarios, survivesAllScenarios } = result;
+  const hasNoPension = (sheet.pensionAnnual ?? 0) === 0;
 
   return (
     <div className="flex flex-col gap-3">
+      {hasNoPension && (
+        <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800">
+          ⚠️ 年金の年額が0円のまま試算されています。これは「公的年金を一切受け取らない」という
+          仮定であり、多くの方にとって実態と異なります。金額を勝手に見積もることはできないため、
+          お手数ですが
+          <a
+            href="https://www.nenkin.go.jp/n_net/"
+            target="_blank"
+            rel="noreferrer"
+            className="underline"
+          >
+            ねんきんネット
+          </a>
+          で見込額をご確認のうえ入力してください。
+        </div>
+      )}
+
       <div
         className={`rounded-lg border p-4 ${
           survivesAllScenarios
