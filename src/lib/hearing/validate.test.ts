@@ -73,6 +73,109 @@ describe("validateField — リスト項目", () => {
     expect(validateField("children", 2).ok).toBe(false);
     expect(validateField("children", null).ok).toBe(false);
   });
+
+  it("空の配列は「子供なし」として受け入れる", () => {
+    // 未入力ではなく「0人と回答済み」の意味（状態機械の意味論）
+    expect(validateField("children", []).ok).toBe(true);
+    expect(validateField("customEvents", []).ok).toBe(true);
+  });
+
+  describe("children — 要素の形の検証", () => {
+    it("正しい形の要素からなる配列を受け入れる", () => {
+      const r = validateField("children", [
+        { age: 10, path: "public" },
+        { age: 15, path: "private" },
+      ]);
+      expect(r.ok).toBe(true);
+    });
+
+    it("id 付きの要素も受け入れる（文字列であれば）", () => {
+      const r = validateField("children", [{ id: "abc", age: 10, path: "public" }]);
+      expect(r.ok).toBe(true);
+    });
+
+    it("null 要素を拒否する", () => {
+      expect(validateField("children", [null]).ok).toBe(false);
+    });
+
+    it("undefined 要素を拒否する", () => {
+      expect(validateField("children", [undefined]).ok).toBe(false);
+    });
+
+    it("必須キーが欠けた要素を拒否する", () => {
+      expect(validateField("children", [{ age: 10 }]).ok).toBe(false); // path が無い
+      expect(validateField("children", [{ path: "public" }]).ok).toBe(false); // age が無い
+    });
+
+    it("型の違う値を拒否する", () => {
+      expect(validateField("children", [{ age: "10", path: "public" }]).ok).toBe(false);
+    });
+
+    it("path が不正な列挙値の要素を拒否する", () => {
+      expect(
+        validateField("children", [{ age: 10, path: "international" }]).ok,
+      ).toBe(false);
+    });
+
+    it("拒否理由に該当インデックスを含む", () => {
+      const r = validateField("children", [
+        { age: 10, path: "public" },
+        { age: 10, path: "invalid" },
+      ]);
+      expect(r.ok).toBe(false);
+      if (!r.ok) {
+        expect(r.reason).toContain("2件目");
+      }
+    });
+  });
+
+  describe("customEvents — 要素の形の検証", () => {
+    it("正しい形の要素からなる配列を受け入れる", () => {
+      const r = validateField("customEvents", [
+        { age: 35, amount: 3_000_000, label: "住宅購入" },
+      ]);
+      expect(r.ok).toBe(true);
+    });
+
+    it("null 要素を拒否する", () => {
+      expect(validateField("customEvents", [null]).ok).toBe(false);
+    });
+
+    it("undefined 要素を拒否する", () => {
+      expect(validateField("customEvents", [undefined]).ok).toBe(false);
+    });
+
+    it("必須キーが欠けた要素を拒否する", () => {
+      expect(
+        validateField("customEvents", [{ age: 35, label: "住宅購入" }]).ok,
+      ).toBe(false); // amount が無い
+    });
+
+    it("amount が数値でない要素を拒否する", () => {
+      // LLMが「3000万」のような文字列で返すことがある
+      expect(
+        validateField("customEvents", [{ age: 35, amount: "3000万", label: "住宅購入" }])
+          .ok,
+      ).toBe(false);
+    });
+
+    it("age が数値でない要素を拒否する", () => {
+      expect(
+        validateField("customEvents", [{ age: "10", amount: 1000, label: "x" }]).ok,
+      ).toBe(false);
+    });
+
+    it("拒否理由に該当インデックスを含む", () => {
+      const r = validateField("customEvents", [
+        { age: 35, amount: 1000, label: "ok" },
+        { age: 35, amount: "bad", label: "ng" },
+      ]);
+      expect(r.ok).toBe(false);
+      if (!r.ok) {
+        expect(r.reason).toContain("2件目");
+      }
+    });
+  });
 });
 
 describe("validateField — 未知のキー", () => {

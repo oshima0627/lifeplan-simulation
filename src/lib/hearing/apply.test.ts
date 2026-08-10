@@ -75,4 +75,16 @@ describe("applyExtraction", () => {
     const { sheet } = applyExtraction(BASE, { currentAge: 45 });
     expect(sheet.currentAge).toBe(45);
   });
+
+  it("不正な要素を含む children は理由付きで拒否し、黙ってマージしない", () => {
+    // §3.3: Sonnet が欠損パラメータを null 混じりの配列などで
+    // もっともらしく埋めてくることがある。ここが最後の関門
+    const { sheet, rejected } = applyExtraction(BASE, {
+      children: [{ age: 10, path: "public" }, null],
+    });
+    expect(sheet.children).toBeUndefined();
+    expect(rejected).toHaveLength(1);
+    expect(rejected[0].key).toBe("children");
+    expect(rejected[0].reason).toContain("2件目");
+  });
 });

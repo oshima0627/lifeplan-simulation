@@ -53,5 +53,18 @@ export function validateField(key: FieldKey, value: unknown): ValidationResult {
   if (!Array.isArray(value)) {
     return { ok: false, reason: `${spec.label}は一覧で指定してください` };
   }
+  // 配列の「入れ物」だけでなく、各要素の形も検証する。
+  // ここを通さないと null/undefined の混入や欠けたキーがそのまま
+  // 計算エンジン（cashflow.ts / education.ts）まで届き、NaN 伝播や
+  // 例外につながる（レビュー指摘）
+  for (let i = 0; i < value.length; i++) {
+    const elementReason = spec.element(value[i]);
+    if (elementReason !== null) {
+      return {
+        ok: false,
+        reason: `${spec.label}の${i + 1}件目: ${elementReason}`,
+      };
+    }
+  }
   return { ok: true, value };
 }
