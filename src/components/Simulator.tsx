@@ -30,7 +30,17 @@ export function Simulator() {
     if (saved) setSheet(saved);
   }, []);
 
+  // 復元エフェクトと同じフラッシュで走る初回の保存を飛ばすためのフラグ。
+  // これが無いと、復元が反映される前に「既定値」で localStorage を上書きしてしまう。
+  // 直後に復元値で書き直されるので実害は出ないが、その正しさは
+  // React のエフェクト実行順序に依存していて壊れやすいため、明示的に守る
+  const skipFirstSave = useRef(true);
+
   useEffect(() => {
+    if (skipFirstSave.current) {
+      skipFirstSave.current = false;
+      return;
+    }
     saveSheet(sheet);
   }, [sheet]);
 
