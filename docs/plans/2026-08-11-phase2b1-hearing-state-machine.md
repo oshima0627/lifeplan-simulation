@@ -413,7 +413,7 @@ export function validateField(key: FieldKey, value: unknown): ValidationResult {
 npm test -- src/lib/hearing/validate.test.ts
 ```
 
-期待: 13 passed
+期待: 12 passed
 
 - [ ] **Step 5: コミット**
 
@@ -651,7 +651,7 @@ export function progress(sheet: Partial<HearingSheet>): {
 npm test -- src/lib/hearing/state.test.ts
 ```
 
-期待: 17 passed
+期待: 18 passed
 
 - [ ] **Step 5: コミット**
 
