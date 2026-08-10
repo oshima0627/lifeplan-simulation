@@ -30,6 +30,15 @@ export function HearingForm({
   const children = sheet.children ?? [];
   const events = sheet.customEvents ?? [];
 
+  // 現在の年齢をあとから引き上げると、リタイア予定年齢・年金受給開始年齢が
+  // 現在の年齢を下回ることがある。これはイベントの範囲外と違って「試算に反映されない」
+  // のではなく、cashflow.ts の `age < retirementAge` 判定が全期間 false になり、
+  // 給与収入が黙って0円として試算され続けてしまう。年金受給開始年齢も同様に
+  // 「現在の年齢より前」を許すと入力の意図と食い違うため、ここで検知して見せる
+  const isRetirementAgeInvalid = sheet.retirementAge < sheet.currentAge;
+  const effectivePensionStartAge = sheet.pensionStartAge ?? DEFAULT_PENSION_START_AGE;
+  const isPensionStartAgeInvalid = effectivePensionStartAge < sheet.currentAge;
+
   const setChild = (index: number, patch: Partial<Child>) => {
     const next = children.map((c, i) => (i === index ? { ...c, ...patch } : c));
     set("children", next);
@@ -107,15 +116,29 @@ export function HearingForm({
           hint="利回りが適用される資産"
         />
 
-        <NumberField
-          label="リタイア予定年齢"
-          value={sheet.retirementAge}
-          onChange={(v) => set("retirementAge", v)}
-          suffix="歳"
-          integer
-          min={sheet.currentAge}
-          max={LIFE_EXPECTANCY_AGE}
-        />
+        <div
+          className={
+            isRetirementAgeInvalid
+              ? "flex flex-col gap-2 rounded border border-amber-400 bg-amber-50 p-3"
+              : undefined
+          }
+        >
+          {isRetirementAgeInvalid && (
+            <p className="text-xs font-medium text-amber-700">
+              ⚠️ 現在の年齢より前になっています。この状態では給与収入が全期間0円として
+              試算されます。現在の年齢以上に修正してください
+            </p>
+          )}
+          <NumberField
+            label="リタイア予定年齢"
+            value={sheet.retirementAge}
+            onChange={(v) => set("retirementAge", v)}
+            suffix="歳"
+            integer
+            min={sheet.currentAge}
+            max={LIFE_EXPECTANCY_AGE}
+          />
+        </div>
 
         <DerivedSummary sheet={sheet} />
       </section>
@@ -146,15 +169,28 @@ export function HearingForm({
           hint="ねんきんネットの見込額を入れてください"
         />
 
-        <NumberField
-          label="年金の受給開始年齢"
-          value={sheet.pensionStartAge ?? DEFAULT_PENSION_START_AGE}
-          onChange={(v) => set("pensionStartAge", v)}
-          suffix="歳"
-          integer
-          min={sheet.currentAge}
-          max={LIFE_EXPECTANCY_AGE}
-        />
+        <div
+          className={
+            isPensionStartAgeInvalid
+              ? "flex flex-col gap-2 rounded border border-amber-400 bg-amber-50 p-3"
+              : undefined
+          }
+        >
+          {isPensionStartAgeInvalid && (
+            <p className="text-xs font-medium text-amber-700">
+              ⚠️ 現在の年齢より前になっています。現在の年齢以上に修正してください
+            </p>
+          )}
+          <NumberField
+            label="年金の受給開始年齢"
+            value={sheet.pensionStartAge ?? DEFAULT_PENSION_START_AGE}
+            onChange={(v) => set("pensionStartAge", v)}
+            suffix="歳"
+            integer
+            min={sheet.currentAge}
+            max={LIFE_EXPECTANCY_AGE}
+          />
+        </div>
 
         <div className="flex flex-col gap-3">
           <div className="flex items-center justify-between">

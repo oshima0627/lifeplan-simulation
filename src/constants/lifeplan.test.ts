@@ -31,6 +31,13 @@ describe("ライフプラン定数", () => {
     expect(opt.pensionSlidePct).toBe(0);
   });
 
+  it("年金スライド幅の3値を固定する（docs/requirements.md §5.1.1 に基づくモデル前提であり、実装の詳細ではない）", () => {
+    const [opt, base, pes] = SCENARIOS;
+    expect(opt.pensionSlidePct).toBe(0);
+    expect(base.pensionSlidePct).toBe(0.5);
+    expect(pes.pensionSlidePct).toBe(1.0);
+  });
+
   it("教育費テーブルが全段階ぶん揃っている", () => {
     for (const path of ["public", "private"] as const) {
       for (const { stage } of EDUCATION_STAGES) {

@@ -9,6 +9,12 @@
  * 年齢に小数（例: 6.5歳）が入ると年次ループの整数年と噛み合わず、
  * イベントが黙って発生しなくなる不具合につながるため、年齢系フィールドは
  * 必ず `integer` を指定すること
+ *
+ * 丸め・クランプは onBlur でのみ行う。onChange（＝キー入力のたび）に適用すると、
+ * 制御コンポーネントのため入力途中の値が即座に丸められてしまい、
+ * 「40 を 25 に打ち替える」といった単純な操作すら成立しなくなる
+ * （例: "2" と打った瞬間に min でクランプされ "18" に化け、次のキーで "185" →
+ * max クランプで "94" になる。小さい値へ打ち替えることが不可能になる）
  */
 export function NumberField({
   label,
@@ -46,6 +52,13 @@ export function NumberField({
           min={min}
           max={max}
           onChange={(e) => {
+            // 入力途中は丸め・クランプをしない。ここでやると制御コンポーネントの
+            // 再レンダリングで入力中の値が書き換わり、打ち替え・削除が成立しなくなる
+            const next = Number(e.target.value);
+            onChange(Number.isFinite(next) ? next : 0);
+          }}
+          onBlur={(e) => {
+            // 確定タイミング（フォーカスを外したとき）にだけ整数丸め・範囲クランプを行う
             let next = Number(e.target.value);
             if (!Number.isFinite(next)) next = 0;
             if (integer) next = Math.round(next);

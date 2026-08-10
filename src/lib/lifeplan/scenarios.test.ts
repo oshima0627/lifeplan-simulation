@@ -30,6 +30,32 @@ const DOOMED: HearingSheet = {
   retirementAge: 65,
 };
 
+/**
+ * どのシナリオも初年度に大きな出費でマイナスへ落ちるが、その後の黒字（退職金＋
+ * 年金が生活費を毎年上回り続ける）で95歳までに回復し、二度とマイナスに戻らない設定。
+ * 全シナリオが temporaryShortfall = true / depletionAge = null になるはずで、
+ * survivesAllScenarios が「尽きない」だけを見て true になってしまわないかを
+ * 確認するための fixture。
+ *
+ * currentAge === retirementAge === pensionStartAge にして給与を0円に固定し、
+ * 「年金（毎年）− 生活費（毎年）」の差が3シナリオとも一貫してプラスになるよう
+ * 十分なマージンを持たせている（悲観シナリオは年金の伸びが生活費のインフレより
+ * 遅いが、95歳までの期間内では逆転しない差を確保した）
+ */
+const TEMPORARY_SHORTFALL_ONLY: HearingSheet = {
+  currentAge: 60,
+  occupation: "employee",
+  householdNetIncome: 0,
+  annualLivingCost: 3_000_000,
+  savings: 0,
+  investments: 0,
+  retirementAge: 60,
+  retirementLumpSum: 2_000_000,
+  pensionAnnual: 5_000_000,
+  pensionStartAge: 60,
+  customEvents: [{ age: 60, amount: 15_000_000, label: "初年度の大きな出費" }],
+};
+
 describe("runAllScenarios", () => {
   it("楽観・普通・悲観の3シナリオを返す", () => {
     const result = runAllScenarios(SAFE);
@@ -63,5 +89,16 @@ describe("runAllScenarios", () => {
     const result = runAllScenarios(SAFE);
     const lengths = result.scenarios.map((s) => s.rows.length);
     expect(new Set(lengths).size).toBe(1);
+  });
+
+  it("全シナリオが一時的にマイナスへ落ちて回復するだけでも survivesAllScenarios は false になる", () => {
+    const result = runAllScenarios(TEMPORARY_SHORTFALL_ONLY);
+
+    // 前提: このfixtureはどのシナリオも実際には「尽きて」いない
+    // （depletionAge は null）。それでも一時的な赤字があるので
+    // 「尽きない」＝「計画は強い」と主張してはいけない
+    expect(result.scenarios.every((s) => s.depletionAge === null)).toBe(true);
+    expect(result.scenarios.some((s) => s.temporaryShortfall)).toBe(true);
+    expect(result.survivesAllScenarios).toBe(false);
   });
 });
