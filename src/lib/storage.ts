@@ -1,7 +1,10 @@
+import { newRowId } from "./id";
 import type { HearingSheet } from "./lifeplan/types";
 
-/** 保存キー。スキーマを壊す変更をしたら v2 に上げて古いデータを無視させる */
-const STORAGE_KEY = "lifeplan.sheet.v1";
+/** 保存キー。スキーマを壊す変更をしたら番号を上げ、移行を書く */
+const STORAGE_KEY = "lifeplan.sheet.v2";
+/** 旧スキーマ（行に id が無い）のキー。移行元としてだけ読む */
+const LEGACY_KEY_V1 = "lifeplan.sheet.v1";
 
 /** 初回表示時の既定値。40歳・年収600万・生活費月30万の想定 */
 export const DEFAULT_SHEET: HearingSheet = {
@@ -45,15 +48,52 @@ export function saveSheet(sheet: HearingSheet): void {
 }
 
 /**
+ * v1（行に id が無い）を v2 に変換する。
+ *
+ * 仕様（docs/requirements.md §4.2）:
+ * - 変換に成功したときだけ v2 に保存し、v1 を消す
+ * - **失敗したら v1 を消さない。** 消してから失敗すると復旧手段が無くなる
+ */
+function migrateV1(raw: string): HearingSheet | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (!isValidSheet(parsed)) return null;
+
+  const sheet = parsed as HearingSheet;
+  return {
+    ...sheet,
+    children: sheet.children?.map((c) => ({ ...c, id: newRowId() })),
+    customEvents: sheet.customEvents?.map((e) => ({ ...e, id: newRowId() })),
+  };
+}
+
+/**
  * 保存済みの入力内容を読み出す。
  * 未保存・破損・スキーマ不一致のいずれでも null を返し、呼び出し側は既定値にフォールバックする
  */
 export function loadSheet(): HearingSheet | null {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return null;
-    const parsed: unknown = JSON.parse(raw);
-    return isValidSheet(parsed) ? parsed : null;
+    if (raw) {
+      const parsed: unknown = JSON.parse(raw);
+      return isValidSheet(parsed) ? parsed : null;
+    }
+
+    // v2 が無いときだけ旧スキーマを見にいく
+    const legacy = localStorage.getItem(LEGACY_KEY_V1);
+    if (!legacy) return null;
+
+    const migrated = migrateV1(legacy);
+    if (!migrated) return null;
+
+    // 変換できたときだけ、保存してから旧キーを消す
+    saveSheet(migrated);
+    localStorage.removeItem(LEGACY_KEY_V1);
+    return migrated;
   } catch {
     return null;
   }
