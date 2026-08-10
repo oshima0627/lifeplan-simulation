@@ -1,6 +1,6 @@
 "use client";
 
-import { DEFAULT_PENSION_START_AGE } from "@/constants/lifeplan";
+import { DEFAULT_PENSION_START_AGE, LIFE_EXPECTANCY_AGE } from "@/constants/lifeplan";
 import type { Child, HearingSheet, LifeEvent, Occupation } from "@/lib/lifeplan/types";
 import { DerivedSummary } from "./DerivedSummary";
 import { NumberField } from "./NumberField";
@@ -50,6 +50,10 @@ export function HearingForm({
           value={sheet.currentAge}
           onChange={(v) => set("currentAge", v)}
           suffix="歳"
+          integer
+          min={18}
+          max={LIFE_EXPECTANCY_AGE - 1}
+          hint="18〜94歳の範囲で入力してください"
         />
 
         <label className="flex flex-col gap-1 text-sm">
@@ -108,6 +112,9 @@ export function HearingForm({
           value={sheet.retirementAge}
           onChange={(v) => set("retirementAge", v)}
           suffix="歳"
+          integer
+          min={sheet.currentAge}
+          max={LIFE_EXPECTANCY_AGE}
         />
 
         <DerivedSummary sheet={sheet} />
@@ -144,6 +151,9 @@ export function HearingForm({
           value={sheet.pensionStartAge ?? DEFAULT_PENSION_START_AGE}
           onChange={(v) => set("pensionStartAge", v)}
           suffix="歳"
+          integer
+          min={sheet.currentAge}
+          max={LIFE_EXPECTANCY_AGE}
         />
 
         <div className="flex flex-col gap-3">
@@ -175,6 +185,9 @@ export function HearingForm({
                   value={child.age}
                   onChange={(v) => setChild(i, { age: v })}
                   suffix="歳"
+                  integer
+                  min={0}
+                  max={22}
                 />
               </div>
               <label className="flex flex-1 flex-col gap-1 text-sm">
@@ -192,6 +205,7 @@ export function HearingForm({
               </label>
               <button
                 type="button"
+                aria-label={`第${i + 1}子を削除`}
                 className="shrink-0 rounded border border-slate-300 px-3 py-2 text-xs hover:bg-slate-100"
                 onClick={() => set("children", children.filter((_, j) => j !== i))}
               >
@@ -212,7 +226,13 @@ export function HearingForm({
               onClick={() =>
                 set("customEvents", [
                   ...events,
-                  { age: sheet.currentAge + 5, amount: 30_000_000, label: "住宅購入" },
+                  {
+                    // currentAge をあとから上げても既定値が範囲外にならないよう、
+                    // 上限（95歳）でクランプしておく
+                    age: Math.min(sheet.currentAge + 5, LIFE_EXPECTANCY_AGE),
+                    amount: 30_000_000,
+                    label: "住宅購入",
+                  },
                 ])
               }
             >
@@ -226,50 +246,67 @@ export function HearingForm({
             </p>
           )}
 
-          {events.map((event, i) => (
-            <div
-              key={i}
-              className="flex flex-col gap-2 rounded border border-slate-200 bg-white p-3"
-            >
-              <label className="flex flex-col gap-1 text-sm">
-                <span className="font-medium text-slate-700">内容</span>
-                <input
-                  type="text"
-                  className="rounded border border-slate-300 px-3 py-2 focus:border-slate-500 focus:outline-none"
-                  value={event.label}
-                  onChange={(e) => setEvent(i, { label: e.target.value })}
-                />
-              </label>
-              <div className="flex items-end gap-2">
-                <div className="flex-1">
-                  <NumberField
-                    label="発生する年齢"
-                    value={event.age}
-                    onChange={(v) => setEvent(i, { age: v })}
-                    suffix="歳"
+          {events.map((event, i) => {
+            // 現在の年齢をあとから引き上げると、すでに登録済みのイベントが
+            // 試算範囲外になることがある。その場合は計算エンジンが黙って無視するので、
+            // ここで検知してユーザーに見えるようにする
+            const isOutOfRange = event.age < sheet.currentAge || event.age > LIFE_EXPECTANCY_AGE;
+            return (
+              <div
+                key={i}
+                className={`flex flex-col gap-2 rounded border p-3 ${
+                  isOutOfRange ? "border-amber-400 bg-amber-50" : "border-slate-200 bg-white"
+                }`}
+              >
+                {isOutOfRange && (
+                  <p className="text-xs font-medium text-amber-700">
+                    ⚠️ 現在の年齢〜95歳の範囲外のため、この項目は試算に反映されていません
+                  </p>
+                )}
+                <label className="flex flex-col gap-1 text-sm">
+                  <span className="font-medium text-slate-700">内容</span>
+                  <input
+                    type="text"
+                    className="rounded border border-slate-300 px-3 py-2 focus:border-slate-500 focus:outline-none"
+                    value={event.label}
+                    onChange={(e) => setEvent(i, { label: e.target.value })}
                   />
+                </label>
+                <div className="flex items-end gap-2">
+                  <div className="flex-1">
+                    <NumberField
+                      label="発生する年齢"
+                      value={event.age}
+                      onChange={(v) => setEvent(i, { age: v })}
+                      suffix="歳"
+                      integer
+                      min={sheet.currentAge}
+                      max={LIFE_EXPECTANCY_AGE}
+                    />
+                  </div>
+                  <div className="flex-[2]">
+                    <NumberField
+                      label="金額"
+                      value={event.amount}
+                      onChange={(v) => setEvent(i, { amount: v })}
+                      suffix="円"
+                      step={1_000_000}
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    aria-label={`「${event.label || `イベント${i + 1}`}」を削除`}
+                    className="shrink-0 rounded border border-slate-300 px-3 py-2 text-xs hover:bg-slate-100"
+                    onClick={() =>
+                      set("customEvents", events.filter((_, j) => j !== i))
+                    }
+                  >
+                    削除
+                  </button>
                 </div>
-                <div className="flex-[2]">
-                  <NumberField
-                    label="金額"
-                    value={event.amount}
-                    onChange={(v) => setEvent(i, { amount: v })}
-                    suffix="円"
-                    step={1_000_000}
-                  />
-                </div>
-                <button
-                  type="button"
-                  className="shrink-0 rounded border border-slate-300 px-3 py-2 text-xs hover:bg-slate-100"
-                  onClick={() =>
-                    set("customEvents", events.filter((_, j) => j !== i))
-                  }
-                >
-                  削除
-                </button>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </section>
     </div>
