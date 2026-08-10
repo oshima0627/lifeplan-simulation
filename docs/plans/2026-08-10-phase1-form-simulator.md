@@ -286,7 +286,14 @@ git commit -m "chore: Next.js 静的エクスポート + Vitest のプロジェ�
 
 `src/lib/lifeplan/types.ts`:
 ```ts
-/** 職業。将来的に年金・退職金の既定値を出し分けるために持つ */
+/**
+ * 職業。
+ *
+ * ⚠️ Phase 1 の計算では使わない。それでも Tier 1 の必須項目として持つのは、
+ * localStorage に保存するスキーマを Phase 2（AIヒアリング）で変えずに済ませるため。
+ * Phase 2 では会話の分岐（自営業なら生活防衛資金を1年分で聞く等）に使う。
+ * 保存キーを v1 のまま保てることを優先した意図的な前倒し（docs/requirements.md §4）
+ */
 export type Occupation = "employee" | "civil_servant" | "self_employed" | "other";
 
 /** 子供の進路。教育費テーブルの参照キー */
@@ -554,18 +561,28 @@ describe("ライフプラン定数", () => {
 });
 ```
 
-- [ ] **Step 4: テストを実行**
+- [ ] **Step 4: Task 1 のスモークテストを削除する**
+
+`src/lib/smoke.test.ts` は Vitest が動くことを確認するためだけの足場だった。
+このタスクで実データを検証する本物のテストが入るので、役目を終えた足場は消す。
 
 ```bash
-npm test -- src/constants/lifeplan.test.ts
+rm src/lib/smoke.test.ts
 ```
 
-期待: 7 passed
-
-- [ ] **Step 5: コミット**
+- [ ] **Step 5: テストを実行**
 
 ```bash
-git add src/lib/lifeplan/types.ts src/constants/lifeplan.ts src/constants/lifeplan.test.ts
+npm test
+```
+
+期待: 7 passed（スモークテストは消えているので、この7件がすべて）
+
+- [ ] **Step 6: コミット**
+
+```bash
+git rm --cached src/lib/smoke.test.ts 2>/dev/null || true
+git add -A src/lib/lifeplan/types.ts src/constants/lifeplan.ts src/constants/lifeplan.test.ts src/lib/
 git commit -m "feat: ライフプランの型定義とドメイン定数を追加
 
 教育費は文科省「令和5年度 子供の学習費調査」の2026-01-16訂正版を使用。
