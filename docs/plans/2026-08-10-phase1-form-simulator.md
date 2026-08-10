@@ -2177,9 +2177,14 @@ export function Simulator() {
   const [sheet, setSheet] = useState<HearingSheet>(DEFAULT_SHEET);
 
   // localStorage は静的エクスポート時のプリレンダリングでは触れないので、
-  // マウント後に読み込んで差し替える
+  // マウント後に読み込んで差し替える。
+  // レンダー中に読むと、ビルド時のHTML（既定値）とクライアントの初回描画が
+  // 食い違って hydration 不一致になるため、この順序以外に安全な形が無い。
+  // react-hooks/set-state-in-effect は「外部ストアとの同期」にあたるこの用途を
+  // 弾いてくるので、理由を添えてこの1行だけ無効化する
   useEffect(() => {
     const saved = loadSheet();
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (saved) setSheet(saved);
   }, []);
 
