@@ -24,6 +24,13 @@ describe("ライフプラン定数", () => {
     expect(base.inflationPct).toBeLessThan(pes.inflationPct);
   });
 
+  it("年金スライド幅は楽観 < 普通 < 悲観の順になっている（悲観ほど年金の目減りを織り込む）", () => {
+    const [opt, base, pes] = SCENARIOS;
+    expect(opt.pensionSlidePct).toBeLessThan(base.pensionSlidePct);
+    expect(base.pensionSlidePct).toBeLessThan(pes.pensionSlidePct);
+    expect(opt.pensionSlidePct).toBe(0);
+  });
+
   it("教育費テーブルが全段階ぶん揃っている", () => {
     for (const path of ["public", "private"] as const) {
       for (const { stage } of EDUCATION_STAGES) {

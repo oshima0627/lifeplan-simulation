@@ -10,6 +10,7 @@ const FLAT: ScenarioAssumption = {
   returnPct: 0,
   raisePct: 0,
   inflationPct: 0,
+  pensionSlidePct: 0,
 };
 
 /** 黒字が出る標準的なシート。年収600万・生活費400万 → 年200万の黒字 */
@@ -181,5 +182,97 @@ describe("simulateCashflow", () => {
     const result = simulateCashflow(BASE, FLAT);
     expect(result.key).toBe("baseline");
     expect(result.label).toBe("検証用");
+  });
+});
+
+describe("インフレ調整（docs/requirements.md §5.1.1）", () => {
+  it("年金は「インフレ率 − スライド幅」の改定率で毎年増える", () => {
+    const sheet: HearingSheet = {
+      ...BASE,
+      pensionAnnual: 2_000_000,
+      pensionStartAge: BASE.currentAge, // 即時受給にして経過年数の効果だけを見る
+    };
+    const assumption: ScenarioAssumption = {
+      ...FLAT,
+      inflationPct: 3,
+      pensionSlidePct: 1, // 年金改定率 = 3% - 1% = 2%
+    };
+    const result = simulateCashflow(sheet, assumption);
+    const atElapsed5 = result.rows.find((r) => r.age === BASE.currentAge + 5)!;
+    const expectedPension = 2_000_000 * 1.02 ** 5;
+    // raisePct は 0 なので給与は一定。合算後に丸められるため合算値で比較する
+    expect(atElapsed5.income).toBe(Math.round(BASE.householdNetIncome + expectedPension));
+  });
+
+  it("年金改定率はマイナスにならない（スライド幅がインフレ率を上回っても年金は目減りしない）", () => {
+    const sheet: HearingSheet = {
+      ...BASE,
+      pensionAnnual: 2_000_000,
+      pensionStartAge: BASE.currentAge,
+    };
+    const assumption: ScenarioAssumption = {
+      ...FLAT,
+      inflationPct: 0.5,
+      pensionSlidePct: 1, // インフレ率を上回るスライド幅
+    };
+    const result = simulateCashflow(sheet, assumption);
+    const atElapsed5 = result.rows.find((r) => r.age === BASE.currentAge + 5)!;
+    // 改定率 = max(0, 0.5% - 1%) = 0 → 年金は名目のまま
+    expect(atElapsed5.income).toBe(BASE.householdNetIncome + 2_000_000);
+  });
+
+  it("年金スライド幅が大きいシナリオほど年金の伸びは小さい", () => {
+    const sheet: HearingSheet = {
+      ...BASE,
+      pensionAnnual: 2_000_000,
+      pensionStartAge: BASE.currentAge,
+    };
+    const lowSlide = simulateCashflow(sheet, { ...FLAT, inflationPct: 3, pensionSlidePct: 0 });
+    const highSlide = simulateCashflow(sheet, { ...FLAT, inflationPct: 3, pensionSlidePct: 1 });
+    const ageAt10 = BASE.currentAge + 10;
+    const lowIncome = lowSlide.rows.find((r) => r.age === ageAt10)!.income;
+    const highIncome = highSlide.rows.find((r) => r.age === ageAt10)!.income;
+    expect(lowIncome).toBeGreaterThan(highIncome);
+  });
+
+  it("任意イベントの費用は発生時点までインフレ率で調整される", () => {
+    const sheet: HearingSheet = {
+      ...BASE,
+      customEvents: [{ age: 45, amount: 30_000_000, label: "住宅購入" }],
+    };
+    const result = simulateCashflow(sheet, { ...FLAT, inflationPct: 2 });
+    const at45 = result.rows.find((r) => r.age === 45)!;
+    const elapsed = 45 - BASE.currentAge;
+    const expectedLiving = BASE.annualLivingCost * 1.02 ** elapsed;
+    const expectedEventCost = 30_000_000 * 1.02 ** elapsed;
+    expect(at45.expense).toBe(Math.round(expectedLiving + expectedEventCost));
+  });
+
+  it("教育費イベントの費用も発生時点までインフレ率で調整される", () => {
+    const sheet: HearingSheet = { ...BASE, children: [{ age: 6, path: "public" }] };
+    const flatResult = simulateCashflow(sheet, FLAT);
+    const inflatedResult = simulateCashflow(sheet, { ...FLAT, inflationPct: 2 });
+    // 発生は初年度（elapsed=0）なので、まずは将来年での差で確認する必要がある。
+    // 6歳の小学校入学は初年度に発生するため、代わりに中学入学（elapsed=6）で比較する
+    const ageAtJunior = BASE.currentAge + (12 - 6);
+    const flatEventCost =
+      flatResult.rows.find((r) => r.age === ageAtJunior)!.expense -
+      BASE.annualLivingCost;
+    const inflatedRow = inflatedResult.rows.find((r) => r.age === ageAtJunior)!;
+    const elapsed = ageAtJunior - BASE.currentAge;
+    const expectedLiving = BASE.annualLivingCost * 1.02 ** elapsed;
+    const expectedEventCost = flatEventCost * 1.02 ** elapsed;
+    expect(inflatedRow.expense).toBe(Math.round(expectedLiving + expectedEventCost));
+  });
+
+  it("退職金は名目固定で、インフレ率が上がっても増減しない", () => {
+    const sheet: HearingSheet = { ...BASE, retirementLumpSum: 20_000_000 };
+    const flatLump = simulateCashflow(sheet, FLAT);
+    const inflatedLump = simulateCashflow(sheet, { ...FLAT, inflationPct: 5 });
+    // リタイア年は給与が0・年金未設定のため、収入 = 退職金そのもの
+    const atRetirementFlat = flatLump.rows.find((r) => r.age === sheet.retirementAge)!;
+    const atRetirementInflated = inflatedLump.rows.find((r) => r.age === sheet.retirementAge)!;
+    expect(atRetirementFlat.income).toBe(20_000_000);
+    expect(atRetirementInflated.income).toBe(20_000_000);
   });
 });

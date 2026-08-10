@@ -10,15 +10,16 @@ export const LIFE_EXPECTANCY_AGE = 95;
 export const DEFAULT_PENSION_START_AGE = 65;
 
 /**
- * 3シナリオの前提値（docs/requirements.md §5.2）。
- * 利回りだけでなく昇給率・インフレ率も連動させる。
+ * 3シナリオの前提値（docs/requirements.md §5.2, §5.1.1）。
+ * 利回り・昇給率・インフレ率に加えて、年金のスライド幅もシナリオごとに連動させる。
+ * 悲観シナリオでは年金の目減りリスクも織り込む。
  * 悲観シナリオでも破綻しないなら、その計画は強いと判定できる
  */
 export const SCENARIOS: readonly ScenarioAssumption[] = [
-  { key: "optimistic", label: "楽観", returnPct: 5, raisePct: 2, inflationPct: 1 },
-  { key: "baseline", label: "普通", returnPct: 3.5, raisePct: 1, inflationPct: 2 },
-  { key: "pessimistic", label: "悲観", returnPct: 2, raisePct: 0, inflationPct: 3 },
-] as const;
+  { key: "optimistic", label: "楽観", returnPct: 5, raisePct: 2, inflationPct: 1, pensionSlidePct: 0 },
+  { key: "baseline", label: "普通", returnPct: 3.5, raisePct: 1, inflationPct: 2, pensionSlidePct: 0.5 },
+  { key: "pessimistic", label: "悲観", returnPct: 2, raisePct: 0, inflationPct: 3, pensionSlidePct: 1.0 },
+];
 
 /** 進学段階の定義。子供の年齢 startAge〜endAge（両端を含む）がその段階にあたる */
 export const EDUCATION_STAGES: readonly {
@@ -32,7 +33,7 @@ export const EDUCATION_STAGES: readonly {
   { stage: "junior", label: "中学校", startAge: 12, endAge: 14 },
   { stage: "high", label: "高校", startAge: 15, endAge: 17 },
   { stage: "university", label: "大学", startAge: 18, endAge: 21 },
-] as const;
+];
 
 /**
  * 進学段階ごとの「子供1人あたり年間教育費」（円）。
