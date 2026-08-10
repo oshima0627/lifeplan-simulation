@@ -148,4 +148,33 @@ describe("v1 からの移行", () => {
     expect(loaded).not.toBeNull();
     expect(loaded!.children).toBeUndefined();
   });
+
+  it("v2 への書き込みが失敗したら v1 を消さない（唯一の控えを失わせない）", () => {
+    // 容量超過やプライベートブラウジングでは setItem だけが失敗し、
+    // removeItem は通ることがある。移行後の setItem だけを失敗させて再現する
+    const store = new Map<string, string>();
+    store.set("lifeplan.sheet.v1", JSON.stringify(V1_SHEET));
+    vi.stubGlobal("localStorage", {
+      getItem: (k: string) => store.get(k) ?? null,
+      setItem: (k: string, v: string) => {
+        if (k === "lifeplan.sheet.v2") {
+          throw new Error("QuotaExceededError");
+        }
+        store.set(k, v);
+      },
+      removeItem: (k: string) => void store.delete(k),
+      clear: () => store.clear(),
+    });
+
+    const loaded = loadSheet();
+
+    // 返り値は今回のセッションで使えるよう、移行済みの内容のまま
+    expect(loaded).not.toBeNull();
+    expect(loaded!.currentAge).toBe(45);
+    // v2 は書き込めていない
+    expect(store.get("lifeplan.sheet.v2")).toBeUndefined();
+    // v1 はまだ残っている ── ここで消していたら、次回の読み出しで
+    // v2 も v1 も無くなり、ユーザーの入力内容が完全に失われる
+    expect(store.get("lifeplan.sheet.v1")).not.toBeUndefined();
+  });
 });

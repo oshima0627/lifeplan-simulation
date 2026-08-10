@@ -38,12 +38,19 @@ function isValidSheet(value: unknown): value is HearingSheet {
 /**
  * 入力内容をブラウザに保存する。
  * サーバーには送らない（docs/requirements.md §6）
+ *
+ * 戻り値は書き込みが実際に成功したか。呼び出し側の大半は結果を見ずに
+ * 「ベストエフォートで保存」で構わないが、移行処理（`loadSheet`）は
+ * 「新しい保存が成功したことを確認してから旧データを消す」ために
+ * この戻り値を必要とする
  */
-export function saveSheet(sheet: HearingSheet): void {
+export function saveSheet(sheet: HearingSheet): boolean {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(sheet));
+    return true;
   } catch {
     // プライベートブラウジングや容量超過で失敗しうる。保存できなくても操作は続行させる
+    return false;
   }
 }
 
@@ -90,9 +97,18 @@ export function loadSheet(): HearingSheet | null {
     const migrated = migrateV1(legacy);
     if (!migrated) return null;
 
-    // 変換できたときだけ、保存してから旧キーを消す
-    saveSheet(migrated);
-    localStorage.removeItem(LEGACY_KEY_V1);
+    // **書き込みが成功したときだけ**旧キーを消す。
+    // saveSheet は例外を握り潰して void を返す実装だと、呼び出し側は
+    // 「書き込みが本当に成功したか」を知りようがない。容量超過や、
+    // setItem だけ拒否してremoveItemは許すプライベートブラウジングの
+    // 実装では、確認せずに消すと「新しい保存が失敗したのに唯一の
+    // 控えを削除する」＝データの完全消失になる
+    const saved = saveSheet(migrated);
+    if (saved) {
+      localStorage.removeItem(LEGACY_KEY_V1);
+    }
+    // 書き込みが失敗しても migrated 自体は返す。
+    // 今回のセッションでは復元済みの内容が使え、v1 は次回のために残る
     return migrated;
   } catch {
     return null;
