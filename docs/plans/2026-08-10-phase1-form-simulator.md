@@ -107,9 +107,7 @@ const nextConfig: NextConfig = {
 export default nextConfig;
 ```
 
-`vitest.config.mts`（**拡張子は `.mts`**。`.ts` にすると Vite の `configLoader: 'native'` が
-ESM構文をCommonJSとして読み込もうとして警告を出す。`package.json` に `"type": "module"` を
-足す方法は Next.js 側の設定読み込みに影響しうるので採らない）:
+`vitest.config.mts`:
 ```ts
 import { defineConfig } from "vitest/config";
 import path from "node:path";
@@ -117,7 +115,7 @@ import path from "node:path";
 export default defineConfig({
   resolve: {
     alias: {
-      "@": path.resolve(__dirname, "src"),
+      "@": path.resolve(import.meta.dirname, "src"),
     },
   },
   test: {
@@ -126,6 +124,13 @@ export default defineConfig({
   },
 });
 ```
+
+> ⚠️ **拡張子は `.mts`、パス解決は `import.meta.dirname`。両方セットで意味がある。**
+> `.ts` のままだと Vite の `configLoader: 'native'` が ESM 構文を CommonJS として
+> 読み込もうとして警告を出す。かといって `.mts` にするだけだと、今度は ESM に存在しない
+> `__dirname` が警告対象になる。`package.json` に `"type": "module"` を足す解法は
+> Next.js 側の設定読み込みに影響しうるので採らない。
+> `import.meta.dirname` は Node 20.11 以上が必要。
 
 `tsconfig.json`:
 ```json
