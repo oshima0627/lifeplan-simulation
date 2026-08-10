@@ -1,6 +1,7 @@
 "use client";
 
 import { DEFAULT_PENSION_START_AGE, LIFE_EXPECTANCY_AGE } from "@/constants/lifeplan";
+import { newRowId } from "@/lib/id";
 import type { Child, HearingSheet, LifeEvent, Occupation } from "@/lib/lifeplan/types";
 import { DerivedSummary } from "./DerivedSummary";
 import { NumberField } from "./NumberField";
@@ -198,7 +199,9 @@ export function HearingForm({
             <button
               type="button"
               className="rounded border border-slate-300 px-3 py-1 text-xs hover:bg-slate-100"
-              onClick={() => set("children", [...children, { age: 0, path: "public" }])}
+              onClick={() =>
+                set("children", [...children, { id: newRowId(), age: 0, path: "public" }])
+              }
             >
               追加
             </button>
@@ -263,6 +266,7 @@ export function HearingForm({
                 set("customEvents", [
                   ...events,
                   {
+                    id: newRowId(),
                     // currentAge をあとから上げても既定値が範囲外にならないよう、
                     // 上限（95歳）でクランプしておく
                     age: Math.min(sheet.currentAge + 5, LIFE_EXPECTANCY_AGE),

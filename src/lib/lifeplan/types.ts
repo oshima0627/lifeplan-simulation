@@ -16,6 +16,12 @@ export type EducationStage = "kindergarten" | "elementary" | "junior" | "high" |
 
 /** 子供1人ぶんの情報 */
 export interface Child {
+  /**
+   * 行の安定ID（docs/requirements.md §4.1）。
+   * React の key と、Phase 2b で LLM が特定の行を指すために使う。
+   * 計算には一切使わない
+   */
+  id: string;
   /** 現在年齢（0〜22） */
   age: number;
   /** 進路。全段階に一律で適用する */
@@ -24,6 +30,12 @@ export interface Child {
 
 /** 特定の年に発生する一時的な支出 */
 export interface LifeEvent {
+  /**
+   * 行の安定ID（docs/requirements.md §4.1）。
+   * React の key と、Phase 2b で LLM が特定の行を指すために使う。
+   * 計算には一切使わない
+   */
+  id: string;
   /** 本人（シミュレーション主体）が何歳のときに発生するか */
   age: number;
   /** 金額（円）。支出は正の数で表す */

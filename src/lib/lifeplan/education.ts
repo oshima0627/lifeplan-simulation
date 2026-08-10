@@ -4,6 +4,7 @@ import {
   LIFE_EXPECTANCY_AGE,
   UNIVERSITY_ENTRANCE_FEE,
 } from "@/constants/lifeplan";
+import { newRowId } from "@/lib/id";
 import type { Child, LifeEvent } from "./types";
 
 /**
@@ -38,6 +39,7 @@ export function buildEducationEvents(
         if (parentAge > LIFE_EXPECTANCY_AGE) continue;
 
         events.push({
+          id: newRowId(),
           age: parentAge,
           amount: EDUCATION_ANNUAL_COST[child.path][stage],
           label: `${who} ${label}`,
@@ -46,6 +48,7 @@ export function buildEducationEvents(
         // 大学は入学年に入学料が別途かかる
         if (stage === "university" && childAge === startAge) {
           events.push({
+            id: newRowId(),
             age: parentAge,
             amount: UNIVERSITY_ENTRANCE_FEE[child.path],
             label: `${who} 大学入学料`,
