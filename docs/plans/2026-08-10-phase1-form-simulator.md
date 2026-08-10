@@ -198,6 +198,7 @@ next-env.d.ts
 .env*
 .dev.vars
 .DS_Store
+.superpowers/
 ```
 
 - [ ] **Step 3: 最小のアプリシェルを作成**
