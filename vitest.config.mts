@@ -8,7 +8,10 @@ export default defineConfig({
     },
   },
   test: {
-    include: ["src/**/*.test.ts"],
+    // Simulator.test.tsx だけは jsdom 環境が要る（DOM操作・localStorage の
+    // 実機的な検証のため）。ファイル先頭の `// @vitest-environment jsdom` で
+    // その1ファイルだけ上書きするので、ここではデフォルトの node のままでよい
+    include: ["src/**/*.test.{ts,tsx}"],
     environment: "node",
   },
 });

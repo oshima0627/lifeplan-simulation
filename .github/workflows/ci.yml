@@ -1,0 +1,34 @@
+name: CI
+
+# 計算エンジン（資産が何歳で尽きるかを判定する部分）がこのアプリの本体。
+# ここが壊れたまま気づかずデプロイされることを防ぐのが唯一の目的なので、
+# テスト・型・lint・ビルドのどれか1つでも失敗したらマージ・デプロイをブロックする。
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: テスト（計算エンジンのユニットテスト）
+        run: npm test
+
+      - name: 型チェック
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: ビルド（静的エクスポート）
+        run: npm run build
