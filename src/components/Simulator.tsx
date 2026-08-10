@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { runAllScenarios } from "@/lib/lifeplan/scenarios";
 import type { HearingSheet } from "@/lib/lifeplan/types";
 import { DEFAULT_SHEET, clearSheet, loadSheet, saveSheet } from "@/lib/storage";

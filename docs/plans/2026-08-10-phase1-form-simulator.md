@@ -2158,7 +2158,7 @@ git commit -m "feat: 3シナリオの資産推移グラフと枯渇判定表示�
 ```tsx
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { runAllScenarios } from "@/lib/lifeplan/scenarios";
 import type { HearingSheet } from "@/lib/lifeplan/types";
 import { DEFAULT_SHEET, clearSheet, loadSheet, saveSheet } from "@/lib/storage";
@@ -2188,7 +2188,17 @@ export function Simulator() {
     if (saved) setSheet(saved);
   }, []);
 
+  // 復元エフェクトと同じフラッシュで走る初回の保存を飛ばすためのフラグ。
+  // これが無いと、復元が反映される前に「既定値」で localStorage を上書きしてしまう。
+  // 直後に復元値で書き直されるので実害は出ないが、その正しさは
+  // React のエフェクト実行順序に依存していて壊れやすいため、明示的に守る
+  const skipFirstSave = useRef(true);
+
   useEffect(() => {
+    if (skipFirstSave.current) {
+      skipFirstSave.current = false;
+      return;
+    }
     saveSheet(sheet);
   }, [sheet]);
 
@@ -2305,7 +2315,12 @@ npm run lint
 npm run build
 ```
 
-期待: テスト全件 pass、型・lint エラーなし、`out/` が生成される
+期待: テスト全件 pass、型・lint エラーなし、`out/` に `index.html`・`privacy.html`・`404.html` が生成される
+
+> `privacy` は `out/privacy/index.html` ではなく **`out/privacy.html`** になる。
+> `trailingSlash` を設定していないときの Next.js 静的エクスポートの通常の出力で、
+> Cloudflare の Static Assets は `/privacy` をこのファイルから配信する（既定の
+> `html_handling` がフォールバックする）。姉妹プロジェクトも同じ形で本番稼働している。
 
 - [ ] **Step 5: 開発サーバーで実機確認**
 
@@ -2432,7 +2447,7 @@ npm test
 npm run build
 ```
 
-期待: 全テスト pass、`out/index.html` と `out/privacy/index.html` が生成される
+期待: 全テスト pass、`out/index.html` と `out/privacy.html` が生成される
 
 - [ ] **Step 4: コミット**
 
