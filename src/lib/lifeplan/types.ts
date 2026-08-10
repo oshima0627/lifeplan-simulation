@@ -4,7 +4,8 @@
  * ⚠️ Phase 1 の計算では使わない。それでも Tier 1 の必須項目として持つのは、
  * localStorage に保存するスキーマを Phase 2（AIヒアリング）で変えずに済ませるため。
  * Phase 2 では会話の分岐（自営業なら生活防衛資金を1年分で聞く等）に使う。
- * 保存キーを v1 のまま保てることを優先した意図的な前倒し（docs/requirements.md §4）
+ * 保存スキーマ（現在は v2）に無用な破壊的変更を発生させないことを優先した
+ * 意図的な前倒し（docs/requirements.md §4）
  */
 export type Occupation = "employee" | "civil_servant" | "self_employed" | "other";
 

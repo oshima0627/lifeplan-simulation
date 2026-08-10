@@ -58,6 +58,38 @@ describe("HearingForm の行操作", () => {
     expect(latest.children!.map((c) => c.id)).toEqual(["a", "c"]);
   });
 
+  it("先頭の行を削除しても、残る行のDOM要素は使い回されない（React の key が id に基づく証拠, Finding 4）", () => {
+    const withThree: HearingSheet = {
+      ...BASE,
+      children: [
+        { id: "a", age: 10, path: "public" },
+        { id: "b", age: 7, path: "public" },
+        { id: "c", age: 4, path: "public" },
+      ],
+    };
+    let latest: HearingSheet = withThree;
+    const { rerender } = render(
+      <HearingForm sheet={withThree} onChange={(s) => (latest = s)} />,
+    );
+
+    // 3行目（id: c, 4歳）の年齢入力欄の DOM ノードを覚えておく
+    const thirdRowInputBefore = screen.getByDisplayValue("4") as HTMLInputElement;
+
+    // 1行目（id: a）を削除する
+    fireEvent.click(screen.getByRole("button", { name: "第1子を削除" }));
+    rerender(<HearingForm sheet={latest} onChange={(s) => (latest = s)} />);
+
+    // 削除後、元3行目だった行（id: c）は新しい2行目として表示されている
+    const thirdRowInputAfter = screen.getByDisplayValue("4") as HTMLInputElement;
+
+    // key が id 基準なら、React は c 行の既存 DOM ノードをそのまま再利用する。
+    // key が配列インデックス基準に戻ると、index 1 の位置には元の b 行（7歳）の
+    // ノードが再利用され、c 行の値だけが後から書き込まれる形になり、
+    // このノード同一性が崩れる
+    expect(thirdRowInputAfter).toBe(thirdRowInputBefore);
+    expect(thirdRowInputAfter.value).toBe("4");
+  });
+
   it("任意イベントを追加するとIDが振られる", () => {
     let latest: HearingSheet = BASE;
     render(<HearingForm sheet={BASE} onChange={(s) => (latest = s)} />);

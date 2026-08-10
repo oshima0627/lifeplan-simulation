@@ -65,4 +65,17 @@ describe("buildEducationEvents", () => {
     expect(events.every((e) => e.age <= 95)).toBe(true);
     expect(events.filter((e) => e.label.includes("小学校"))).toHaveLength(0);
   });
+
+  it("同じ入力なら何度呼んでも同じ出力になる（id を含めて決定的）", () => {
+    const children = [
+      { id: "c1", age: 6, path: "public" as const },
+      { id: "c2", age: 18, path: "private" as const },
+    ];
+    const first = buildEducationEvents(children, 40);
+    const second = buildEducationEvents(children, 40);
+    expect(second).toEqual(first);
+    // id 自体もランダムでないことを確認する（呼ぶたびに違う UUID だと上の toEqual は落ちるはずだが、
+    // 明示的に固定形式であることも確認しておく）
+    expect(first.every((e) => /^edu-\d+-[a-z]+-\d+(-entrance)?$/.test(e.id))).toBe(true);
+  });
 });

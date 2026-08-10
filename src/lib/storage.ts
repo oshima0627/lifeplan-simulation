@@ -79,18 +79,35 @@ function migrateV1(raw: string): HearingSheet | null {
 }
 
 /**
+ * v2 を読み出す。未保存・破損・スキーマ不一致のいずれも null。
+ *
+ * JSON.parse の失敗をここでローカルに握りつぶすのが重要（docs/requirements.md §4.2）。
+ * 外側の try/catch に任せると「v2 が壊れている」と「localStorage が全滅している」の
+ * 区別がつかなくなり、v1 フォールバックへ進めなくなる
+ */
+function readV2(): HearingSheet | null {
+  const raw = localStorage.getItem(STORAGE_KEY);
+  if (!raw) return null;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return isValidSheet(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * 保存済みの入力内容を読み出す。
  * 未保存・破損・スキーマ不一致のいずれでも null を返し、呼び出し側は既定値にフォールバックする
  */
 export function loadSheet(): HearingSheet | null {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) {
-      const parsed: unknown = JSON.parse(raw);
-      return isValidSheet(parsed) ? parsed : null;
-    }
+    const v2 = readV2();
+    if (v2) return v2;
 
-    // v2 が無いときだけ旧スキーマを見にいく
+    // v2 が無い、または壊れている／スキーマ不一致のときは v1 を見にいく。
+    // v1 が残っていること自体が「移行が完了していない」証拠であり、
+    // 無視すると唯一の復旧可能な控えを捨てることになる（docs/requirements.md §4.2）
     const legacy = localStorage.getItem(LEGACY_KEY_V1);
     if (!legacy) return null;
 
@@ -105,7 +122,16 @@ export function loadSheet(): HearingSheet | null {
     // 控えを削除する」＝データの完全消失になる
     const saved = saveSheet(migrated);
     if (saved) {
-      localStorage.removeItem(LEGACY_KEY_V1);
+      // 旧キーの削除は後始末であって移行の成否ではない（docs/requirements.md §4.2）。
+      // ここが例外を投げても、v2 への書き込みはすでに成功している。
+      // 独立した try/catch にしないと、この削除の失敗だけで
+      // 「移行は成功したのに null を返す」という新たなデータ消失経路になる
+      try {
+        localStorage.removeItem(LEGACY_KEY_V1);
+      } catch {
+        // 消せなくても実害はない。次回の読み出しでも v2 が優先されるため
+        // 再度この分岐に来ることはなく、単に v1 が残り続けるだけ
+      }
     }
     // 書き込みが失敗しても migrated 自体は返す。
     // 今回のセッションでは復元済みの内容が使え、v1 は次回のために残る
