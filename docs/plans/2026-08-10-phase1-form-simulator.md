@@ -168,16 +168,30 @@ export default config;
 
 `eslint.config.mjs`:
 ```js
-import { dirname } from "path";
-import { fileURLToPath } from "url";
-import { FlatCompat } from "@eslint/eslintrc";
+import { defineConfig, globalIgnores } from "eslint/config";
+import nextVitals from "eslint-config-next/core-web-vitals";
+import nextTs from "eslint-config-next/typescript";
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-const compat = new FlatCompat({ baseDirectory: __dirname });
+const eslintConfig = defineConfig([
+  ...nextVitals,
+  ...nextTs,
+  globalIgnores([
+    ".next/**",
+    "out/**",
+    "build/**",
+    ".wrangler/**",
+    ".superpowers/**",
+    "next-env.d.ts",
+  ]),
+]);
 
-export default [...compat.extends("next/core-web-vitals", "next/typescript")];
+export default eslintConfig;
 ```
+
+> ⚠️ **`@eslint/eslintrc` の `FlatCompat` は使わない。** `eslint-config-next` 16系は
+> フラット設定を直接エクスポートするので互換ブリッジは不要で、`compat.extends("next/core-web-vitals")`
+> は `Converting circular structure to JSON` で**リポジトリ全体の lint が落ちる**。
+> `@eslint/eslintrc` は devDependencies にも入っていない（推移的解決に頼ることになる）。
 
 `wrangler.jsonc`:
 ```jsonc
