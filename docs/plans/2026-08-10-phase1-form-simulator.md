@@ -1073,7 +1073,7 @@ export function simulateCashflow(
 npm test -- src/lib/lifeplan/cashflow.test.ts
 ```
 
-期待: 17 passed
+期待: 18 passed
 
 - [ ] **Step 5: コミット**
 
@@ -1105,21 +1105,37 @@ import { describe, expect, it } from "vitest";
 import { runAllScenarios } from "./scenarios";
 import type { HearingSheet } from "./types";
 
-/** 黒字が出る標準的なシート */
-const BASE: HearingSheet = {
+/**
+ * 資産が桁違いに大きく、悲観シナリオでも絶対に尽きない設定。
+ *
+ * 集約ロジックだけを検証したいので、財務的にぎりぎりの値は使わない。
+ * 「このフィクスチャなら尽きるはず」を暗算で決めるとテストが壊れやすくなる
+ */
+const SAFE: HearingSheet = {
   currentAge: 40,
   occupation: "employee",
-  householdNetIncome: 6_000_000,
-  annualLivingCost: 4_000_000,
-  savings: 3_000_000,
-  investments: 5_000_000,
+  householdNetIncome: 10_000_000,
+  annualLivingCost: 1_000_000,
+  savings: 10_000_000,
+  investments: 500_000_000,
   retirementAge: 65,
-  pensionAnnual: 2_000_000,
+  pensionAnnual: 3_000_000,
+};
+
+/** 資産ゼロ・収入より支出が桁違いに大きく、どのシナリオでも初年度から破綻する設定 */
+const DOOMED: HearingSheet = {
+  currentAge: 40,
+  occupation: "employee",
+  householdNetIncome: 1_000_000,
+  annualLivingCost: 20_000_000,
+  savings: 0,
+  investments: 0,
+  retirementAge: 65,
 };
 
 describe("runAllScenarios", () => {
   it("楽観・普通・悲観の3シナリオを返す", () => {
-    const result = runAllScenarios(BASE);
+    const result = runAllScenarios(SAFE);
     expect(result.scenarios).toHaveLength(3);
     expect(result.scenarios.map((s) => s.key)).toEqual([
       "optimistic",
@@ -1129,33 +1145,25 @@ describe("runAllScenarios", () => {
   });
 
   it("最終資産は楽観 > 普通 > 悲観の順になる", () => {
-    const [opt, base, pes] = runAllScenarios(BASE).scenarios;
+    const [opt, base, pes] = runAllScenarios(SAFE).scenarios;
     expect(opt.finalTotal).toBeGreaterThan(base.finalTotal);
     expect(base.finalTotal).toBeGreaterThan(pes.finalTotal);
   });
 
   it("全シナリオで資産が残れば survivesAllScenarios は true", () => {
-    const result = runAllScenarios(BASE);
+    const result = runAllScenarios(SAFE);
     expect(result.scenarios.every((s) => s.depletionAge === null)).toBe(true);
     expect(result.survivesAllScenarios).toBe(true);
   });
 
-  it("1つでも尽きるシナリオがあれば survivesAllScenarios は false", () => {
-    // 資産が少なく生活費が重い設定
-    const fragile: HearingSheet = {
-      ...BASE,
-      annualLivingCost: 5_800_000,
-      savings: 500_000,
-      investments: 1_000_000,
-      pensionAnnual: 1_500_000,
-    };
-    const result = runAllScenarios(fragile);
-    expect(result.scenarios.some((s) => s.depletionAge !== null)).toBe(true);
+  it("全シナリオで尽きれば survivesAllScenarios は false", () => {
+    const result = runAllScenarios(DOOMED);
+    expect(result.scenarios.every((s) => s.depletionAge === 40)).toBe(true);
     expect(result.survivesAllScenarios).toBe(false);
   });
 
   it("各シナリオが同じ年数ぶんの行を持つ", () => {
-    const result = runAllScenarios(BASE);
+    const result = runAllScenarios(SAFE);
     const lengths = result.scenarios.map((s) => s.rows.length);
     expect(new Set(lengths).size).toBe(1);
   });
@@ -1502,7 +1510,7 @@ git commit -m "feat: ヒアリングシートを localStorage に保存する
 - Create: `src/components/NumberField.tsx`, `src/components/DerivedSummary.tsx`, `src/components/HearingForm.tsx`
 
 **Interfaces:**
-- Consumes: `HearingSheet`, `Child`, `Occupation`（Task 2）、`formatYen`（Task 6）
+- Consumes: `HearingSheet`, `Child`, `LifeEvent`, `Occupation`（Task 2）、`DEFAULT_PENSION_START_AGE`（Task 2）、`formatYen`（Task 6）
 - Produces:
   - `NumberField(props: { label: string; value: number; onChange: (v: number) => void; suffix?: string; step?: number; hint?: string })`
   - `DerivedSummary(props: { sheet: HearingSheet })`
@@ -1605,7 +1613,7 @@ export function DerivedSummary({ sheet }: { sheet: HearingSheet }) {
 "use client";
 
 import { DEFAULT_PENSION_START_AGE } from "@/constants/lifeplan";
-import type { Child, HearingSheet, Occupation } from "@/lib/lifeplan/types";
+import type { Child, HearingSheet, LifeEvent, Occupation } from "@/lib/lifeplan/types";
 import { DerivedSummary } from "./DerivedSummary";
 import { NumberField } from "./NumberField";
 
@@ -1632,10 +1640,16 @@ export function HearingForm({
     onChange({ ...sheet, [key]: value });
 
   const children = sheet.children ?? [];
+  const events = sheet.customEvents ?? [];
 
   const setChild = (index: number, patch: Partial<Child>) => {
     const next = children.map((c, i) => (i === index ? { ...c, ...patch } : c));
     set("children", next);
+  };
+
+  const setEvent = (index: number, patch: Partial<LifeEvent>) => {
+    const next = events.map((e, i) => (i === index ? { ...e, ...patch } : e));
+    set("customEvents", next);
   };
 
   return (
@@ -1798,6 +1812,77 @@ export function HearingForm({
             </div>
           ))}
         </div>
+
+        <div className="flex flex-col gap-3">
+          <div className="flex items-center justify-between">
+            <span className="text-sm font-medium text-slate-700">
+              大きな支出の予定
+            </span>
+            <button
+              type="button"
+              className="rounded border border-slate-300 px-3 py-1 text-xs hover:bg-slate-100"
+              onClick={() =>
+                set("customEvents", [
+                  ...events,
+                  { age: sheet.currentAge + 5, amount: 30_000_000, label: "住宅購入" },
+                ])
+              }
+            >
+              追加
+            </button>
+          </div>
+
+          {events.length === 0 && (
+            <p className="text-xs text-slate-500">
+              住宅購入・車の買い替え・リフォームなど、特定の年にまとまって出ていくお金を登録できます。
+            </p>
+          )}
+
+          {events.map((event, i) => (
+            <div
+              key={i}
+              className="flex flex-col gap-2 rounded border border-slate-200 bg-white p-3"
+            >
+              <label className="flex flex-col gap-1 text-sm">
+                <span className="font-medium text-slate-700">内容</span>
+                <input
+                  type="text"
+                  className="rounded border border-slate-300 px-3 py-2 focus:border-slate-500 focus:outline-none"
+                  value={event.label}
+                  onChange={(e) => setEvent(i, { label: e.target.value })}
+                />
+              </label>
+              <div className="flex items-end gap-2">
+                <div className="flex-1">
+                  <NumberField
+                    label="発生する年齢"
+                    value={event.age}
+                    onChange={(v) => setEvent(i, { age: v })}
+                    suffix="歳"
+                  />
+                </div>
+                <div className="flex-[2]">
+                  <NumberField
+                    label="金額"
+                    value={event.amount}
+                    onChange={(v) => setEvent(i, { amount: v })}
+                    suffix="円"
+                    step={1_000_000}
+                  />
+                </div>
+                <button
+                  type="button"
+                  className="shrink-0 rounded border border-slate-300 px-3 py-2 text-xs hover:bg-slate-100"
+                  onClick={() =>
+                    set("customEvents", events.filter((_, j) => j !== i))
+                  }
+                >
+                  削除
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
       </section>
     </div>
   );
@@ -1819,7 +1904,8 @@ npm run lint
 git add src/components/NumberField.tsx src/components/DerivedSummary.tsx src/components/HearingForm.tsx
 git commit -m "feat: ヒアリングフォームと導出値パネルを追加
 
-年間収支は入力させず導出値として表示し、生活費の申告ずれに気付けるようにする。"
+年間収支は入力させず導出値として表示し、生活費の申告ずれに気付けるようにする。
+子供と大きな支出の予定（住宅購入など）は行の追加・削除ができる。"
 ```
 
 ---
@@ -2006,7 +2092,7 @@ git commit -m "feat: 3シナリオの資産推移グラフと枯渇判定表示�
 - Modify: `src/app/page.tsx`
 
 **Interfaces:**
-- Consumes: `HearingForm`（Task 8）、`CashflowChart`, `DepletionVerdict`（Task 9）、`runAllScenarios`（Task 5）、`DEFAULT_SHEET`, `loadSheet`, `saveSheet`（Task 7）
+- Consumes: `HearingForm`（Task 8）、`CashflowChart`, `DepletionVerdict`（Task 9）、`runAllScenarios`（Task 5）、`DEFAULT_SHEET`, `loadSheet`, `saveSheet`, `clearSheet`（Task 7）
 - Produces: 動作する1画面のアプリ
 
 - [ ] **Step 1: 状態管理コンポーネントを作る**
@@ -2018,7 +2104,7 @@ git commit -m "feat: 3シナリオの資産推移グラフと枯渇判定表示�
 import { useEffect, useMemo, useState } from "react";
 import { runAllScenarios } from "@/lib/lifeplan/scenarios";
 import type { HearingSheet } from "@/lib/lifeplan/types";
-import { DEFAULT_SHEET, loadSheet, saveSheet } from "@/lib/storage";
+import { DEFAULT_SHEET, clearSheet, loadSheet, saveSheet } from "@/lib/storage";
 import { CashflowChart } from "./CashflowChart";
 import { DepletionVerdict } from "./DepletionVerdict";
 import { HearingForm } from "./HearingForm";
@@ -2049,8 +2135,18 @@ export function Simulator() {
 
   return (
     <div className="grid gap-6 lg:grid-cols-[minmax(320px,380px)_1fr]">
-      <div className="lg:sticky lg:top-6 lg:self-start">
+      <div className="flex flex-col gap-4 lg:sticky lg:top-6 lg:self-start">
         <HearingForm sheet={sheet} onChange={setSheet} />
+        <button
+          type="button"
+          className="self-start text-xs text-slate-500 underline hover:text-slate-800"
+          onClick={() => {
+            clearSheet();
+            setSheet(DEFAULT_SHEET);
+          }}
+        >
+          入力内容を消して初期値に戻す
+        </button>
       </div>
       <div className="flex flex-col gap-6">
         <DepletionVerdict result={result} />
@@ -2160,7 +2256,9 @@ npm run dev
 - 生活費を年収より大きくすると年間収支が赤字表示になる
 - 生活費を大きくしていくと「◯歳で尽きる」に切り替わる
 - 子供を追加すると進学時期にグラフが下向きに折れる
+- 「大きな支出の予定」を追加するとその年齢でグラフが落ち込む
 - ページを再読み込みしても入力内容が残っている
+- 「入力内容を消して初期値に戻す」を押すと初期値に戻り、再読み込みしても戻ったままになる
 
 - [ ] **Step 6: コミット**
 
