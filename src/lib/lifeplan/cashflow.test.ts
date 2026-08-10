@@ -160,6 +160,55 @@ describe("simulateCashflow", () => {
     const sheet: HearingSheet = { ...BASE, investments: 500_000_000 };
     const result = simulateCashflow(sheet, FLAT);
     expect(result.depletionAge).toBeNull();
+    expect(result.temporaryShortfall).toBe(false);
+  });
+
+  it("一時的にマイナスへ落ちても95歳までに回復すれば depletionAge は null で temporaryShortfall が true になる", () => {
+    // 90歳の時点で大きな買い物（2,000万円）をして一時的にマイナスへ落ちるが、
+    // 黒字（年500万）が続くので93歳には回復し、95歳時点ではプラスで終える
+    const sheet: HearingSheet = {
+      currentAge: 90,
+      occupation: "employee",
+      householdNetIncome: 8_000_000,
+      annualLivingCost: 3_000_000,
+      savings: 0,
+      investments: 0,
+      retirementAge: 999, // 試算範囲内では退職しない
+      customEvents: [{ age: 91, amount: 20_000_000, label: "住宅購入" }],
+    };
+    const result = simulateCashflow(sheet, FLAT);
+    // 91歳・92歳は総資産がマイナスになるが、94歳以降にプラスへ回復する
+    expect(result.rows.find((r) => r.age === 91)!.total).toBeLessThan(0);
+    expect(result.rows.find((r) => r.age === 94)!.total).toBeGreaterThan(0);
+    expect(result.depletionAge).toBeNull();
+    expect(result.temporaryShortfall).toBe(true);
+  });
+
+  it("マイナス→プラス→マイナスと動いても、95歳まで回復しなければ最後の連続マイナス区間の先頭を depletionAge とする", () => {
+    // 41歳で大きな買い物をして一時的にマイナスへ落ちるが、リタイア前の黒字で
+    // 一度プラスに回復する。しかしリタイア後は年金が無く赤字が続くため、
+    // 46歳から95歳まで一度もプラスに戻らない ＝ そこが実質的な枯渇年齢になる
+    const sheet: HearingSheet = {
+      currentAge: 40,
+      occupation: "employee",
+      householdNetIncome: 8_000_000,
+      annualLivingCost: 3_000_000,
+      savings: 0,
+      investments: 0,
+      retirementAge: 45,
+      customEvents: [{ age: 41, amount: 20_000_000, label: "住宅購入" }],
+    };
+    const result = simulateCashflow(sheet, FLAT);
+
+    // 一時的なマイナス（41歳付近）
+    expect(result.rows.find((r) => r.age === 41)!.total).toBeLessThan(0);
+    // リタイア前に一度プラスへ回復する
+    expect(result.rows.find((r) => r.age === 44)!.total).toBeGreaterThan(0);
+    // リタイア後は年金が無いので赤字が続き、二度と回復しない
+    expect(result.rows.at(-1)!.total).toBeLessThan(0);
+
+    expect(result.depletionAge).toBe(46);
+    expect(result.temporaryShortfall).toBe(false);
   });
 
   it("枯渇後のマイナス残高には利回りを適用しない", () => {

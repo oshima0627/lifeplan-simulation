@@ -38,10 +38,12 @@ export function DepletionVerdict({ result }: { result: LifeplanResult }) {
           <div key={s.key} className="rounded border border-slate-200 bg-white p-3">
             <div className="text-xs font-medium text-slate-500">{s.label}</div>
             <div className="mt-1 text-sm font-bold text-slate-900">
-              {s.depletionAge === null ? (
-                <span className="text-emerald-700">尽きない</span>
-              ) : (
+              {s.depletionAge !== null ? (
                 <span className="text-red-700">{s.depletionAge}歳で尽きる</span>
+              ) : s.temporaryShortfall ? (
+                <span className="text-amber-700">一時的に資金不足</span>
+              ) : (
+                <span className="text-emerald-700">尽きない</span>
               )}
             </div>
             <div className="mt-1 text-xs text-slate-500">

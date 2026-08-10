@@ -60,7 +60,6 @@ export function simulateCashflow(
   let savings = sheet.savings;
   let investments = sheet.investments;
   const rows: YearRow[] = [];
-  let depletionAge: number | null = null;
 
   for (let age = sheet.currentAge; age <= LIFE_EXPECTANCY_AGE; age++) {
     // 現在からの経過年数。昇給・インフレの累乗に使う
@@ -112,10 +111,6 @@ export function simulateCashflow(
     }
 
     const total = savings + investments;
-    // 総資産が初めてマイナスになった年齢を記録する（記録済みなら上書きしない）
-    if (depletionAge === null && total < 0) {
-      depletionAge = age;
-    }
 
     rows.push({
       age,
@@ -129,11 +124,28 @@ export function simulateCashflow(
     });
   }
 
+  // 「尽きる年齢」は一時的な赤字と区別する。単に一度マイナスになっただけでは
+  // 「尽きた」とは言わない — 大きな買い物で一時的にマイナスへ落ちても、その後の
+  // 黒字で回復するなら、それは一時的な資金不足であって破綻ではない。
+  //
+  // 末尾（95歳）から遡り、95歳まで連続してマイナスの区間の先頭を探す。
+  // これが「そこから二度と回復しなかった最初の年齢」＝実質的な枯渇年齢になる
+  let depletionAge: number | null = null;
+  for (let i = rows.length - 1; i >= 0; i--) {
+    if (rows[i].total < 0) {
+      depletionAge = rows[i].age;
+    } else {
+      break;
+    }
+  }
+  const temporaryShortfall = depletionAge === null && rows.some((r) => r.total < 0);
+
   return {
     key: assumption.key,
     label: assumption.label,
     rows,
     depletionAge,
+    temporaryShortfall,
     finalTotal: Math.round(savings + investments),
   };
 }

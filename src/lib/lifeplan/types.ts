@@ -120,8 +120,20 @@ export interface ScenarioResult {
   label: string;
   /** 現在年齢から95歳までの各年 */
   rows: YearRow[];
-  /** 総資産が初めてマイナスになる年齢。最後まで尽きなければ null */
+  /**
+   * 総資産が95歳まで一度もプラスに回復しない最初の年齢（＝資産が「尽きた」年齢）。
+   *
+   * 一度マイナスになっただけでは「尽きた」とは言わない。大きな買い物で一時的に
+   * マイナスへ落ちても、その後の黒字で回復するなら null になる
+   * （このとき temporaryShortfall が true になる）。最後まで尽きなければ null
+   */
   depletionAge: number | null;
+  /**
+   * 一時的にマイナスへ落ちたが、95歳までに回復した（＝資産は尽きていない）ことを示す。
+   * true のときは depletionAge は null。
+   * 判定カードはこの場合「尽きる」ではなく「一時的に資金不足」と表示する
+   */
+  temporaryShortfall: boolean;
   /** 95歳時点の総資産（円） */
   finalTotal: number;
 }
