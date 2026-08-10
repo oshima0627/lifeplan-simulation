@@ -49,7 +49,7 @@
 ### Task 1: プロジェクト初期化
 
 **Files:**
-- Create: `package.json`, `tsconfig.json`, `next.config.ts`, `vitest.config.ts`, `postcss.config.mjs`, `eslint.config.mjs`, `wrangler.jsonc`, `.gitignore`, `src/app/layout.tsx`, `src/app/globals.css`, `src/app/page.tsx`
+- Create: `package.json`, `tsconfig.json`, `next.config.ts`, `vitest.config.mts`, `postcss.config.mjs`, `eslint.config.mjs`, `wrangler.jsonc`, `.gitignore`, `src/app/layout.tsx`, `src/app/globals.css`, `src/app/page.tsx`
 - Test: `src/lib/smoke.test.ts`
 
 **Interfaces:**
@@ -107,7 +107,7 @@ const nextConfig: NextConfig = {
 export default nextConfig;
 ```
 
-`vitest.config.ts`:
+`vitest.config.mts`:
 ```ts
 import { defineConfig } from "vitest/config";
 import path from "node:path";
@@ -115,7 +115,7 @@ import path from "node:path";
 export default defineConfig({
   resolve: {
     alias: {
-      "@": path.resolve(__dirname, "src"),
+      "@": path.resolve(import.meta.dirname, "src"),
     },
   },
   test: {
@@ -124,6 +124,13 @@ export default defineConfig({
   },
 });
 ```
+
+> ⚠️ **拡張子は `.mts`、パス解決は `import.meta.dirname`。両方セットで意味がある。**
+> `.ts` のままだと Vite の `configLoader: 'native'` が ESM 構文を CommonJS として
+> 読み込もうとして警告を出す。かといって `.mts` にするだけだと、今度は ESM に存在しない
+> `__dirname` が警告対象になる。`package.json` に `"type": "module"` を足す解法は
+> Next.js 側の設定読み込みに影響しうるので採らない。
+> `import.meta.dirname` は Node 20.11 以上が必要。
 
 `tsconfig.json`:
 ```json
@@ -161,16 +168,30 @@ export default config;
 
 `eslint.config.mjs`:
 ```js
-import { dirname } from "path";
-import { fileURLToPath } from "url";
-import { FlatCompat } from "@eslint/eslintrc";
+import { defineConfig, globalIgnores } from "eslint/config";
+import nextVitals from "eslint-config-next/core-web-vitals";
+import nextTs from "eslint-config-next/typescript";
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-const compat = new FlatCompat({ baseDirectory: __dirname });
+const eslintConfig = defineConfig([
+  ...nextVitals,
+  ...nextTs,
+  globalIgnores([
+    ".next/**",
+    "out/**",
+    "build/**",
+    ".wrangler/**",
+    ".superpowers/**",
+    "next-env.d.ts",
+  ]),
+]);
 
-export default [...compat.extends("next/core-web-vitals", "next/typescript")];
+export default eslintConfig;
 ```
+
+> ⚠️ **`@eslint/eslintrc` の `FlatCompat` は使わない。** `eslint-config-next` 16系は
+> フラット設定を直接エクスポートするので互換ブリッジは不要で、`compat.extends("next/core-web-vitals")`
+> は `Converting circular structure to JSON` で**リポジトリ全体の lint が落ちる**。
+> `@eslint/eslintrc` は devDependencies にも入っていない（推移的解決に頼ることになる）。
 
 `wrangler.jsonc`:
 ```jsonc
@@ -198,6 +219,7 @@ next-env.d.ts
 .env*
 .dev.vars
 .DS_Store
+.superpowers/
 ```
 
 - [ ] **Step 3: 最小のアプリシェルを作成**
@@ -285,7 +307,14 @@ git commit -m "chore: Next.js 静的エクスポート + Vitest のプロジェ�
 
 `src/lib/lifeplan/types.ts`:
 ```ts
-/** 職業。将来的に年金・退職金の既定値を出し分けるために持つ */
+/**
+ * 職業。
+ *
+ * ⚠️ Phase 1 の計算では使わない。それでも Tier 1 の必須項目として持つのは、
+ * localStorage に保存するスキーマを Phase 2（AIヒアリング）で変えずに済ませるため。
+ * Phase 2 では会話の分岐（自営業なら生活防衛資金を1年分で聞く等）に使う。
+ * 保存キーを v1 のまま保てることを優先した意図的な前倒し（docs/requirements.md §4）
+ */
 export type Occupation = "employee" | "civil_servant" | "self_employed" | "other";
 
 /** 子供の進路。教育費テーブルの参照キー */
@@ -553,18 +582,28 @@ describe("ライフプラン定数", () => {
 });
 ```
 
-- [ ] **Step 4: テストを実行**
+- [ ] **Step 4: Task 1 のスモークテストを削除する**
+
+`src/lib/smoke.test.ts` は Vitest が動くことを確認するためだけの足場だった。
+このタスクで実データを検証する本物のテストが入るので、役目を終えた足場は消す。
 
 ```bash
-npm test -- src/constants/lifeplan.test.ts
+rm src/lib/smoke.test.ts
 ```
 
-期待: 7 passed
-
-- [ ] **Step 5: コミット**
+- [ ] **Step 5: テストを実行**
 
 ```bash
-git add src/lib/lifeplan/types.ts src/constants/lifeplan.ts src/constants/lifeplan.test.ts
+npm test
+```
+
+期待: 7 passed（スモークテストは消えているので、この7件がすべて）
+
+- [ ] **Step 6: コミット**
+
+```bash
+git rm --cached src/lib/smoke.test.ts 2>/dev/null || true
+git add -A src/lib/lifeplan/types.ts src/constants/lifeplan.ts src/constants/lifeplan.test.ts src/lib/
 git commit -m "feat: ライフプランの型定義とドメイン定数を追加
 
 教育費は文科省「令和5年度 子供の学習費調査」の2026-01-16訂正版を使用。
@@ -815,6 +854,13 @@ describe("simulateCashflow", () => {
     expect(first.investments).toBe(5_500_000); // 500万 × 1.10
   });
 
+  it("投資は運用してから収支を足す（順序が逆だと年末に入れた分にも利回りがつく）", () => {
+    const result = simulateCashflow(BASE, { ...FLAT, returnPct: 10 });
+    // 正しい順序: 500万 × 1.10 = 550万 → 黒字200万を足して 750万
+    // 逆の順序なら (500万 + 200万) × 1.10 = 770万 になり、この期待値は落ちる
+    expect(result.rows[0].investments).toBe(7_500_000);
+  });
+
   it("赤字の年はまず貯金から取り崩す", () => {
     // 生活費が年収を100万上回る
     const sheet: HearingSheet = { ...BASE, annualLivingCost: 7_000_000 };
@@ -908,7 +954,12 @@ describe("simulateCashflow", () => {
   });
 
   it("最後まで尽きなければ depletionAge は null", () => {
-    const result = simulateCashflow(BASE, FLAT);
+    // BASE をそのまま使ってはいけない。年金も退職金も無いため
+    // リタイア後は年400万円の赤字が31年続き、79歳で必ず枯渇する
+    // （65歳時点の資産5,800万円 ÷ 年400万円 ≒ 14.5年）。
+    // 「尽きない」ことを確かめるには、それを吸収できる資産が要る
+    const sheet: HearingSheet = { ...BASE, investments: 500_000_000 };
+    const result = simulateCashflow(sheet, FLAT);
     expect(result.depletionAge).toBeNull();
   });
 
@@ -1073,7 +1124,7 @@ export function simulateCashflow(
 npm test -- src/lib/lifeplan/cashflow.test.ts
 ```
 
-期待: 18 passed
+期待: 19 passed
 
 - [ ] **Step 5: コミット**
 
@@ -2042,9 +2093,15 @@ export function CashflowChart({ result }: { result: LifeplanResult }) {
             width={70}
             tickFormatter={(v: number) => formatCompactYen(v)}
           />
+          {/*
+            recharts の Tooltip は formatter/labelFormatter の引数を
+            ValueType | undefined / ReactNode という緩い型で渡してくる。
+            number / string と注釈すると型エラーになるので、
+            受けは型注釈なしにして中で変換する
+          */}
           <Tooltip
-            formatter={(value: number, name: string) => [formatCompactYen(value), name]}
-            labelFormatter={(label: number) => `${label}歳`}
+            formatter={(value, name) => [formatCompactYen(Number(value ?? 0)), String(name)]}
+            labelFormatter={(label) => `${String(label)}歳`}
           />
           <Legend />
           {/* 資産ゼロの線。ここを下回った時点で計画は破綻している */}
@@ -2101,7 +2158,7 @@ git commit -m "feat: 3シナリオの資産推移グラフと枯渇判定表示�
 ```tsx
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { runAllScenarios } from "@/lib/lifeplan/scenarios";
 import type { HearingSheet } from "@/lib/lifeplan/types";
 import { DEFAULT_SHEET, clearSheet, loadSheet, saveSheet } from "@/lib/storage";
@@ -2120,13 +2177,28 @@ export function Simulator() {
   const [sheet, setSheet] = useState<HearingSheet>(DEFAULT_SHEET);
 
   // localStorage は静的エクスポート時のプリレンダリングでは触れないので、
-  // マウント後に読み込んで差し替える
+  // マウント後に読み込んで差し替える。
+  // レンダー中に読むと、ビルド時のHTML（既定値）とクライアントの初回描画が
+  // 食い違って hydration 不一致になるため、この順序以外に安全な形が無い。
+  // react-hooks/set-state-in-effect は「外部ストアとの同期」にあたるこの用途を
+  // 弾いてくるので、理由を添えてこの1行だけ無効化する
   useEffect(() => {
     const saved = loadSheet();
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (saved) setSheet(saved);
   }, []);
 
+  // 復元エフェクトと同じフラッシュで走る初回の保存を飛ばすためのフラグ。
+  // これが無いと、復元が反映される前に「既定値」で localStorage を上書きしてしまう。
+  // 直後に復元値で書き直されるので実害は出ないが、その正しさは
+  // React のエフェクト実行順序に依存していて壊れやすいため、明示的に守る
+  const skipFirstSave = useRef(true);
+
   useEffect(() => {
+    if (skipFirstSave.current) {
+      skipFirstSave.current = false;
+      return;
+    }
     saveSheet(sheet);
   }, [sheet]);
 
@@ -2243,7 +2315,12 @@ npm run lint
 npm run build
 ```
 
-期待: テスト全件 pass、型・lint エラーなし、`out/` が生成される
+期待: テスト全件 pass、型・lint エラーなし、`out/` に `index.html`・`privacy.html`・`404.html` が生成される
+
+> `privacy` は `out/privacy/index.html` ではなく **`out/privacy.html`** になる。
+> `trailingSlash` を設定していないときの Next.js 静的エクスポートの通常の出力で、
+> Cloudflare の Static Assets は `/privacy` をこのファイルから配信する（既定の
+> `html_handling` がフォールバックする）。姉妹プロジェクトも同じ形で本番稼働している。
 
 - [ ] **Step 5: 開発サーバーで実機確認**
 
@@ -2370,7 +2447,7 @@ npm test
 npm run build
 ```
 
-期待: 全テスト pass、`out/index.html` と `out/privacy/index.html` が生成される
+期待: 全テスト pass、`out/index.html` と `out/privacy.html` が生成される
 
 - [ ] **Step 4: コミット**
 

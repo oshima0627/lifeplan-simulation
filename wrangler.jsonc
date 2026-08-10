@@ -1,0 +1,17 @@
+// Cloudflare Workers (Static Assets) の設定
+// デプロイ: npm run deploy（要 `wrangler login` または CLOUDFLARE_API_TOKEN）
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "lifeplan-simulator",
+  "compatibility_date": "2026-07-01",
+  "assets": {
+    "directory": "./out",
+    "not_found_handling": "404-page"
+  },
+  "routes": [
+    {
+      "pattern": "lifeplan.nexeed-lab.com",
+      "custom_domain": true
+    }
+  ]
+}
