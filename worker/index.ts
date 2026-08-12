@@ -17,11 +17,7 @@ const worker = {
     const url = new URL(request.url);
 
     if (!url.pathname.startsWith("/api/")) {
-      // ASSETS（Fetcher）は Cloudflare 独自の Request/Response 型を要求するが、
-      // 実体は標準 Fetch API と互換なので、境界でのみ型を合わせる。
-      return env.ASSETS.fetch(
-        request as unknown as Parameters<typeof env.ASSETS.fetch>[0],
-      ) as unknown as Promise<Response>;
+      return env.ASSETS.fetch(request);
     }
 
     // 疎通確認用。ルーティングが効いているかを本番で見るためだけに置く。
@@ -35,6 +31,6 @@ const worker = {
 
     return errorResponse("NOT_FOUND", "エンドポイントが存在しません", 404);
   },
-};
+} satisfies ExportedHandler<Env>;
 
 export default worker;

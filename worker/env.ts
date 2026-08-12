@@ -1,5 +1,3 @@
-import type { D1Database, Fetcher } from "@cloudflare/workers-types";
-
 /**
  * Worker が受け取るバインディングとシークレットの形。
  *
