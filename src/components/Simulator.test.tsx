@@ -24,9 +24,11 @@ afterEach(() => {
 describe("Simulator の保存・復元・リセット", () => {
   it("localStorageに何も保存されていなければ既定値（DEFAULT_SHEET）を表示する", async () => {
     render(<Simulator />);
+    // モーダルが自動で開くとラベルが二重になるので、先に閉じる
+    fireEvent.keyDown(document, { key: "Escape" });
 
     const input = await screen.findByLabelText(/^現在の年齢/);
-    expect(input).toHaveValue(DEFAULT_SHEET.currentAge);
+    expect(input).toHaveValue(String(DEFAULT_SHEET.currentAge));
   });
 
   it("localStorageに保存済みのシートがあれば、マウント後にそれを復元してフォームに反映する", async () => {
@@ -40,15 +42,17 @@ describe("Simulator の保存・復元・リセット", () => {
     render(<Simulator />);
 
     const input = await screen.findByLabelText(/^現在の年齢/);
-    expect(input).toHaveValue(52);
+    expect(input).toHaveValue("52");
   });
 
   it("入力を変更するとlocalStorageに保存される", async () => {
     render(<Simulator />);
+    // モーダルが自動で開くとラベルが二重になるので、先に閉じる
+    fireEvent.keyDown(document, { key: "Escape" });
     const input = await screen.findByLabelText(/^現在の年齢/);
 
     fireEvent.change(input, { target: { value: "50" } });
-    expect(input).toHaveValue(50);
+    expect(input).toHaveValue("50");
 
     const persisted = loadSheet();
     expect(persisted?.currentAge).toBe(50);
@@ -61,12 +65,70 @@ describe("Simulator の保存・復元・リセット", () => {
     render(<Simulator />);
     const input = await screen.findByLabelText(/^現在の年齢/);
     // 復元されていることを先に確認してから、リセットの効果を見る
-    expect(input).toHaveValue(60);
+    expect(input).toHaveValue("60");
 
     fireEvent.click(screen.getByText("入力内容を消して初期値に戻す"));
 
-    expect(input).toHaveValue(DEFAULT_SHEET.currentAge);
+    expect(input).toHaveValue(String(DEFAULT_SHEET.currentAge));
     const persisted = loadSheet();
     expect(persisted?.currentAge).toBe(DEFAULT_SHEET.currentAge);
+  });
+});
+
+describe("初回訪問のモーダル", () => {
+  it("保存が無ければモーダルが開く", async () => {
+    localStorage.clear();
+    render(<Simulator />);
+    expect(await screen.findByRole("dialog")).toHaveAccessibleName("あなたのこと");
+  });
+
+  it("保存があればモーダルは開かない", async () => {
+    localStorage.setItem(
+      "lifeplan.sheet.v2",
+      JSON.stringify({
+        currentAge: 40,
+        occupation: "employee",
+        householdNetIncome: 6_000_000,
+        annualLivingCost: 3_600_000,
+        savings: 3_000_000,
+        investments: 3_000_000,
+        retirementAge: 65,
+      }),
+    );
+    render(<Simulator />);
+    // 復元エフェクトが走りきるのを待ってから確認する
+    expect(await screen.findByText("入力をやり直す")).toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("「入力をやり直す」でモーダルが開く", async () => {
+    localStorage.setItem(
+      "lifeplan.sheet.v2",
+      JSON.stringify({
+        currentAge: 40,
+        occupation: "employee",
+        householdNetIncome: 6_000_000,
+        annualLivingCost: 3_600_000,
+        savings: 3_000_000,
+        investments: 3_000_000,
+        retirementAge: 65,
+      }),
+    );
+    render(<Simulator />);
+    fireEvent.click(await screen.findByText("入力をやり直す"));
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+  });
+
+  it("既定値のまま1項目も変えずにモーダルを閉じても保存される（Finding M-3）", async () => {
+    localStorage.clear();
+    render(<Simulator />);
+    const dialog = await screen.findByRole("dialog");
+    expect(dialog).toBeInTheDocument();
+    expect(loadSheet()).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "閉じる" }));
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(loadSheet()).not.toBeNull();
   });
 });

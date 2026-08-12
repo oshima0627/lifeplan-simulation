@@ -47,7 +47,7 @@
 | `src/components/HearingModal.test.tsx`（新規） | 上記のテスト（jsdom） |
 | `src/components/HearingForm.tsx`（変更） | `NumberField` を `SelectField` に差し替え。警告3件は維持 |
 | `src/components/Simulator.tsx`（変更） | モーダルの開閉制御を追加 |
-| `src/components/NumberField.tsx` | **削除しない。** 使われなくなるが、Task 3 の差し替えが完了するまで参照が残る |
+| `src/components/NumberField.tsx` / `NumberField.test.tsx`（削除） | Task 3 で唯一の利用者 `HearingForm` が使わなくなるため、同じコミットで削除する。git 履歴に残るので復元は可能 |
 
 ---
 
@@ -215,7 +215,7 @@ export const CHILD_AGE_OPTIONS = intOptions(0, 22);
 - [ ] **Step 4: 成功を確認する**
 
 Run: `npx vitest run src/lib/options.test.ts`
-Expected: PASS（15件）
+Expected: PASS（11件）
 
 - [ ] **Step 5: 全体を通してコミットする**
 
@@ -548,7 +548,7 @@ import { SelectField } from "./SelectField";
 
 - [ ] **Step 4: 既存テストの `toHaveValue` を文字列に直す**
 
-⚠️ **これをやらないと `Simulator.test.tsx` が6か所で落ちる。**
+⚠️ **これをやらないと `Simulator.test.tsx` が5か所で落ちる。**
 
 `<input type="number">` に対する `toHaveValue` は**数値**を返すが、
 `<select>` に対しては**文字列**を返す（jest-dom の仕様）。
@@ -563,30 +563,37 @@ import { SelectField } from "./SelectField";
 | `expect(input).toHaveValue(50)` | `expect(input).toHaveValue("50")` |
 | `expect(input).toHaveValue(60)` | `expect(input).toHaveValue("60")` |
 
-（`toHaveValue(DEFAULT_SHEET.currentAge)` は2か所、他は各1か所。**計6か所。**
+（`toHaveValue(DEFAULT_SHEET.currentAge)` は2か所、他は各1か所。**計5か所。**
 `grep -n "toHaveValue" src/components/Simulator.test.tsx` で漏れが無いか確認すること）
 
-`NumberField.test.tsx` は**触らない。** `NumberField` 自体は変えていないので、
-そのテストは数値のままで正しい。
+- [ ] **Step 5: 死んだ `NumberField` を削除する**
 
-- [ ] **Step 5: 成功を確認する**
+`HearingForm` は `NumberField` の**唯一の利用者**（`grep -rn "NumberField" src` で確認済み）。
+Step 3 の差し替えが終わった時点で完全な死にコードになるので、同じコミットで消す。
+
+```bash
+git rm src/components/NumberField.tsx src/components/NumberField.test.tsx
+```
+
+`HearingForm.tsx` から `import { NumberField } from "./NumberField";` を削除するのを忘れないこと
+（残っていると typecheck が「モジュールが見つからない」で落ちる）。
+
+削除に不安があれば git 履歴から復元できる。**残す判断はしない** —
+使われないコンポーネントとそのテストが残っていると、次に読む人が
+「どちらを使うのが正しいのか」を判断できなくなる。
+
+- [ ] **Step 6: 成功を確認する**
 
 Run: `npm test`
 Expected: PASS（全件）
 
-- [ ] **Step 6: 全体を確認してコミットする**
+- [ ] **Step 7: 全体を確認してコミットする**
 
 ```bash
 npm test && npm run typecheck && npm run lint
-git add src/components/HearingForm.tsx src/components/HearingForm.test.tsx
-git commit -m "feat: ヒアリングフォームをプルダウン化"
+git add -A
+git commit -m "feat: ヒアリングフォームをプルダウン化し、NumberFieldを削除"
 ```
-
-⚠️ `npm run lint` が `NumberField` の未使用を指摘したら、**削除せずに残す。**
-Task 3 の時点では他から参照されていないだけで、削除は別タスクの判断
-（`NumberField.test.tsx` も一緒に消す必要がある）。lint が `error` で止まる場合のみ、
-`src/components/NumberField.tsx` と `src/components/NumberField.test.tsx` を
-同じコミットで削除する。
 
 ---
 
@@ -1367,7 +1374,7 @@ recharts の軸設定が本番で初めて壊れていた事例がある（`doma
 
 | 影響 | 発生するタスク | 対処 |
 |---|---|---|
-| `toHaveValue(<数値>)` が6か所で失敗（select の値は文字列） | Task 3 | Task 3 Step 4 |
+| `toHaveValue(<数値>)` が5か所で失敗（select の値は文字列） | Task 3 | Task 3 Step 4 |
 | ラベルが二重になり `findByLabelText` が例外（既存2件） | Task 5 | Task 5 冒頭の注記 |
 
 **4. 型の整合**

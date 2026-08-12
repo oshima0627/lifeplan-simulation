@@ -97,3 +97,47 @@ describe("HearingForm の行操作", () => {
     expect(latest.customEvents![0].id).toBeTruthy();
   });
 });
+
+describe("黙って間違う条件の警告", () => {
+  it("リタイア年齢が現在年齢を下回ると警告が出る", () => {
+    const sheet: HearingSheet = { ...BASE, currentAge: 60, retirementAge: 50 };
+    render(<HearingForm sheet={sheet} onChange={() => {}} />);
+    expect(screen.getByText(/給与収入が全期間0円として/)).toBeInTheDocument();
+  });
+
+  it("年金受給開始年齢が現在年齢を下回ると警告が出る", () => {
+    // retirementAge も明示的に妥当な値にしておく。BASE.retirementAge(65) のままだと
+    // currentAge(70) がそれを上回り、リタイア年齢側の警告も同時に出て
+    // 同じ文言（「現在の年齢より前になっています」）が2箇所に現れ getByText が
+    // 「複数要素が見つかった」で落ちる。ここでは年金側の警告だけを検証したい
+    const sheet: HearingSheet = { ...BASE, currentAge: 70, retirementAge: 70, pensionStartAge: 65 };
+    render(<HearingForm sheet={sheet} onChange={() => {}} />);
+    expect(screen.getByText(/現在の年齢より前になっています/)).toBeInTheDocument();
+  });
+
+  it("試算範囲外のイベントに警告が出る", () => {
+    const sheet: HearingSheet = {
+      ...BASE,
+      currentAge: 40,
+      customEvents: [{ id: "e1", age: 30, amount: 1_000_000, label: "住宅購入" }],
+    };
+    render(<HearingForm sheet={sheet} onChange={() => {}} />);
+    expect(screen.getByText(/試算に反映されていません/)).toBeInTheDocument();
+  });
+});
+
+describe("プルダウン化", () => {
+  it("世帯手取り年収が select になっている", () => {
+    render(<HearingForm sheet={BASE} onChange={() => {}} />);
+    expect(screen.getByLabelText("世帯手取り年収").tagName).toBe("SELECT");
+  });
+
+  it("選択すると数値で通知される", () => {
+    let latest: HearingSheet = BASE;
+    render(<HearingForm sheet={BASE} onChange={(s) => (latest = s)} />);
+    fireEvent.change(screen.getByLabelText("世帯手取り年収"), {
+      target: { value: "7000000" },
+    });
+    expect(latest.householdNetIncome).toBe(7_000_000);
+  });
+});
