@@ -46,6 +46,14 @@ export function CashflowChart({ result }: { result: LifeplanResult }) {
     return point;
   });
 
+  // Y軸の上限。全シナリオが最初からマイナスだと上限が0以下になり軸が潰れる（反転する）ため、
+  // 最低限の幅を持たせる
+  const maxTotal = Math.max(
+    0,
+    ...result.scenarios.flatMap((s) => s.rows.map((r) => r.total)),
+  );
+  const yMax = maxTotal > 0 ? maxTotal : 1_000_000;
+
   const ariaLabel = `資産推移グラフ。${result.scenarios
     .map((s) => `${s.label}シナリオは${describeDepletion(s)}`)
     .join("、")}。`;
@@ -71,8 +79,15 @@ export function CashflowChart({ result }: { result: LifeplanResult }) {
             // 0円未満はモデル上「無制限に0%で借りられる」という便宜的な扱いにすぎず、
             // 実際の予測ではない。悲観シナリオが大きくマイナスに振れると
             // 意味のある0〜1億円帯がグラフの一部に圧縮されてしまうため、
-            // 下限を0円で固定してゼロを跨ぐ位置を常に読み取れるようにする
-            domain={[0, "auto"]}
+            // 下限を0円で固定してゼロを跨ぐ位置を常に読み取れるようにする。
+            //
+            // ⚠️ domain の指定だけでは効かない。recharts は既定で
+            // 「データ全体が収まるように」軸を広げ直すため、実際に
+            // -3.4億円まで軸が伸びていた（デプロイして初めて発覚）。
+            // allowDataOverflow を付けて初めて下限が固定され、
+            // 0円を割った線は軸の下で切り取られる
+            domain={[0, yMax]}
+            allowDataOverflow
           />
           {/*
             recharts の Tooltip は formatter/labelFormatter の引数を
