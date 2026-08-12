@@ -596,13 +596,51 @@ main            = Workerのエントリ
 assets.binding  = Workerからアセットを返すためのバインディング
 ```
 
-⚠️ **`not_found_handling: "404-page"` との相互作用に注意。**
-この設定があると、アセットに一致しないリクエストが404ページで返され、
-**Workerに届かない可能性がある。** `/api/*` を先に Worker へ回す設定
-（`run_worker_first`）が必要になる見込み。
+### 10.1 `not_found_handling` の罠（2026-08-12 に公式ドキュメントで確認済み）
 
-**実装時に wrangler のドキュメントで裏を取ること。**
-記憶で書くと「ローカルでは動くが本番で404」という、最も時間を溶かす失敗になる。
+**懸念は実在した。しかも「たまたま動いてしまう」ぶん質が悪い。**
+
+`compatibility_date` が **2025-04-01 以降**だと `assets_navigation_prefers_asset_serving` が
+既定で有効になり、評価順序はこうなる:
+
+```
+run_worker_first か？ → アセットに一致するか？ → Worker はあるか？ → ナビゲーションリクエストか？
+```
+
+このとき **ナビゲーションリクエストは Worker を素通りして `404.html` が返る。**
+一方 `fetch()` などの非ナビゲーションリクエストは Worker に届く。
+
+当プロジェクトの `compatibility_date` は `2026-07-01` なので**該当する。**
+
+**なぜ危険か:** チャットやフォーム送信を `fetch()` で書いている限り動いてしまう。
+しかし以下は無言で404になる。
+
+- ユーザーが `/api/...` を直接ブラウザで開く
+- `<form action="/api/...">` の素のPOST（JSを無効化された環境、フォールバック実装）
+- 決済プロバイダなどからのリダイレクト着地点を `/api/` 配下に置いた場合
+
+**対策（必須）:** `/api/*` を明示的に Worker 優先にする。
+
+```jsonc
+{
+  "main": "worker/index.ts",
+  "compatibility_date": "2026-07-01",
+  "compatibility_flags": ["nodejs_compat"],   // stripe SDK に必要
+  "assets": {
+    "directory": "./out",
+    "binding": "ASSETS",                      // Worker からアセットを返すのに必要
+    "not_found_handling": "404-page",
+    "run_worker_first": ["/api/*"]            // ← これが無いと上記が404になる
+  }
+}
+```
+
+`run_worker_first` は**真偽値と配列の両方**を受け付ける。`true` にすると全リクエストが
+Worker を通るため、静的アセットの配信までWorkerの実行回数に計上される。
+**配列で `/api/*` だけに絞ること。**
+
+出典: <https://developers.cloudflare.com/workers/static-assets/routing/worker-script/>
+および同 `/static-site-generation/`
 
 OpenNext は使わない。Windows を正式サポートしておらず（WSLかCIが必要）、
 開発環境が Windows のため。**静的エクスポート＋Worker 1本の構成を維持する。**
