@@ -46,17 +46,23 @@ describe("storedKdfVersion", () => {
 });
 
 describe("定数時間比較のフォールバック", () => {
+  // 注: base64url 43文字は32バイト（256bit）を表すが、43文字目（末尾）は
+  // 6bit中2bitがデコード時に切り捨てられるため、末尾1文字だけを変えても
+  // 実際のバイト列が変わらない場合がある（base64 のパディング特性）。
+  // そのため「1バイトだけ違う」検証には、必ずバイトへ反映される位置（末尾
+  // から2文字目・41番目）を使う。
+
   it("1バイトだけ違う値を正しく弾く（早期returnで通り抜けない）", async () => {
     const stored = await hashClientKey(KEY, 1);
-    // KEY と1文字だけ違う鍵
-    const almost = `${"a".repeat(42)}b`;
+    // KEY の末尾から2文字目だけを変えた鍵（デコード結果が確実に1バイト変わる）
+    const almost = `${"a".repeat(41)}b${"a"}`;
     expect(await verifyClientKey(almost, stored)).toBe(false);
   });
 
   it("先頭バイトが違う場合も末尾バイトが違う場合も等しく false", async () => {
     const stored = await hashClientKey(KEY, 1);
     expect(await verifyClientKey(`b${"a".repeat(42)}`, stored)).toBe(false);
-    expect(await verifyClientKey(`${"a".repeat(42)}b`, stored)).toBe(false);
+    expect(await verifyClientKey(`${"a".repeat(41)}b${"a"}`, stored)).toBe(false);
   });
 });
 
