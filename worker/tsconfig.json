@@ -18,6 +18,6 @@
     // 決まりが型検査で一切守られなくなる（I-3）。
     "paths": {}
   },
-  "include": ["**/*.ts"],
+  "include": ["**/*.ts", "../shared/**/*.ts"],
   "exclude": ["../node_modules"]
 }
