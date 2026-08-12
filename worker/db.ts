@@ -77,3 +77,73 @@ export async function findUserIdBySession(
 export async function deleteSession(db: D1Database, tokenHash: string): Promise<void> {
   await db.prepare("DELETE FROM sessions WHERE token_hash = ?").bind(tokenHash).run();
 }
+
+/** パスワード再設定トークンを作成する。生トークンではなくハッシュ済みの値を保存する。 */
+export async function createPasswordReset(
+  db: D1Database,
+  input: { tokenHash: string; userId: string; expiresAt: string },
+): Promise<void> {
+  await db
+    .prepare("INSERT INTO password_resets (token_hash, user_id, expires_at) VALUES (?, ?, ?)")
+    .bind(input.tokenHash, input.userId, input.expiresAt)
+    .run();
+}
+
+/**
+ * パスワード再設定トークンを検証すると同時に使用済みにする。有効なら `userId` を返す。
+ *
+ * ⚠️ 「検証してから使用済みにする」の2ステップにしないこと。その間に同じ
+ * トークンで再度検証が通ると、1つのトークンを2回使える窓ができる
+ * （メール漏洩時などに再設定リンクを踏まれた場合の被害が倍になる）。
+ *
+ * `UPDATE ... WHERE token_hash = ? AND used_at IS NULL AND expires_at > ?` という
+ * 単一SQL文にすることで、「未使用かつ期限内かの判定」と「使用済みにする」を
+ * SQLiteエンジン内で原子的に行う。同時に同じトークンで2回呼ばれても、
+ * `meta.changes` が 1 になるのはどちらか一方だけ（`createUser` の重複判定と同じ考え方）。
+ *
+ * `changes === 0` の場合は「そもそも存在しない／既に使用済み／期限切れ」の
+ * いずれかであり、区別せず null を返す（区別すると「このトークンは存在した」
+ * という情報が漏れる）。
+ */
+export async function consumePasswordReset(
+  db: D1Database,
+  tokenHash: string,
+  now: Date = new Date(),
+): Promise<string | null> {
+  const nowIso = now.toISOString();
+  const result = await db
+    .prepare(
+      "UPDATE password_resets SET used_at = ? WHERE token_hash = ? AND used_at IS NULL AND expires_at > ?",
+    )
+    .bind(nowIso, tokenHash, nowIso)
+    .run();
+  if (result.meta.changes === 0) return null;
+
+  // ここに来た時点で既に使用済みへの更新は完了している。以降の SELECT は
+  // 「誰の再設定だったか」を読み出すだけで、上の原子性には影響しない
+  // （user_id はこの行が作られてから変わることがないため）。
+  const row = await db
+    .prepare("SELECT user_id FROM password_resets WHERE token_hash = ?")
+    .bind(tokenHash)
+    .first<{ user_id: string }>();
+  return row ? row.user_id : null;
+}
+
+/** パスワードハッシュを更新する（再設定完了時）。 */
+export async function updatePasswordHash(
+  db: D1Database,
+  userId: string,
+  passwordHash: string,
+): Promise<void> {
+  await db.prepare("UPDATE users SET password_hash = ? WHERE id = ?").bind(passwordHash, userId).run();
+}
+
+/**
+ * 指定ユーザーの全セッションを削除する。
+ *
+ * パスワード再設定の直後に呼ぶ。再設定の動機は「乗っ取られたかもしれない」
+ * であることが多く、既存セッションを生かしたままにすると再設定した意味がない。
+ */
+export async function deleteAllSessionsForUser(db: D1Database, userId: string): Promise<void> {
+  await db.prepare("DELETE FROM sessions WHERE user_id = ?").bind(userId).run();
+}

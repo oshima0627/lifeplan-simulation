@@ -90,6 +90,15 @@ describe("sendPasswordResetMail", () => {
     expect(body.text).toContain("30");
   });
 
+  it("本文に「再設定すると全端末からログアウトされる」旨の一文が入る", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(jsonResponse({ id: "1" }));
+    await sendPasswordResetMail({ ...baseInput, fetchImpl });
+
+    const [, init] = fetchImpl.mock.calls[0];
+    const body = JSON.parse(init.body as string);
+    expect(body.text).toContain("再設定すると、ログイン中のすべての端末からログアウトされます。");
+  });
+
   it("HTMLを送らずテキストのみで送信する", async () => {
     const fetchImpl = vi.fn().mockResolvedValue(jsonResponse({ id: "1" }));
     await sendPasswordResetMail({ ...baseInput, fetchImpl });

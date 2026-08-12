@@ -1,3 +1,4 @@
+import { handleResetRoute } from "./auth/reset";
 import { handleAuthRoute } from "./auth/routes";
 import type { AppEnv } from "./env";
 import { errorResponse, json } from "./http";
@@ -37,6 +38,9 @@ const worker = {
 
       const authResponse = await handleAuthRoute(request, env, url);
       if (authResponse) return authResponse;
+
+      const resetResponse = await handleResetRoute(request, env, url);
+      if (resetResponse) return resetResponse;
 
       return errorResponse("NOT_FOUND", "エンドポイントが存在しません", 404);
     } catch (err) {
