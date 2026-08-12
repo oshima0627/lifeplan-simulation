@@ -75,6 +75,24 @@ export function requestPasswordReset(email: string, fetchImpl?: typeof fetch): P
 export function resetPassword(input: { token: string; password: string }, fetchImpl?: typeof fetch): Promise<AuthResult>
 ```
 
+> **2026-08-12 実装時に訂正（コーディネーター承認済み・詳細は task-1-report.md）:**
+> `resetPassword({ token, password })` のままでは `deriveClientKey(email, password)` の
+> ソルト（メールアドレス由来）が作れず、再設定後にログインできなくなる欠陥が
+> あった。画面での email 入力は不採用（打ち間違えで原因不明のログイン不能に
+> なるため）。代わりに `GET /api/auth/reset-token?token=...`（有効: `200 {email}`／
+> 無効: `400`、トークンは消費しない）を別途Worker側に追加し、クライアントは
+> 以下の形に変更する。
+>
+> ```ts
+> export function fetchResetTokenEmail(token: string, fetchImpl?: typeof fetch): Promise<string | null>
+> export function resetPassword(input: { token: string; email: string; password: string }, fetchImpl?: typeof fetch): Promise<AuthResult>
+> ```
+>
+> `resetPassword` に渡す `email` は画面入力ではなく `fetchResetTokenEmail` の
+> 戻り値を使うこと。送信ボディに `email` は含めない（サーバーは token だけで
+> 本人確認するため不要）。**Task 4 の `/reset-password` 画面はこれを前提にする**
+> （マウント後に `fetchResetTokenEmail` でメールを引いてから `resetPassword` を呼ぶ）。
+
 **必ず守ること:**
 
 - **パスワード本体をAPIに送らない。** `deriveClientKey(email, password)` で鍵にしてから送る
@@ -94,7 +112,7 @@ export function resetPassword(input: { token: string; password: string }, fetchI
 - `fetchMe` が `{userId: null}` で `null` を返すこと
 - ネットワークエラーで例外を投げず `{ ok: false }` を返すこと
 
-- [ ] **Step 1〜5**: テスト先行で実装し、コミット（`feat: 認証APIのクライアント`）
+- [x] **Step 1〜5**: テスト先行で実装し、コミット（`feat: 認証APIのクライアント`）
 
 ---
 
