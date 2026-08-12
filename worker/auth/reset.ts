@@ -9,6 +9,7 @@ import {
   consumePasswordReset,
   createPasswordReset,
   deleteAllSessionsForUser,
+  findEmailForValidPasswordReset,
   findUserByEmail,
   updatePasswordHash,
 } from "../db";
@@ -43,6 +44,15 @@ const FORGOT_PASSWORD_IP_DAILY_LIMIT = 30;
 // トークンは256bitの乱数なので総当たりは現実的に成立しないが、無認証で
 // D1 の UPDATE を無制限に発行できる経路をそのまま残す理由もないため、緩く絞る。
 const RESET_PASSWORD_IP_DAILY_LIMIT = 60;
+
+// IP別・1日あたりの reset-token（照会）上限。
+//
+// GET /api/auth/reset-token は無認証で、トークンを消費しないため
+// reset-password 以上に何度でも呼べてしまう。トークン自体は256bitの乱数で
+// 総当たりは現実的に成立しないが、無認証で D1 への SELECT を無制限に発行
+// できる経路を残す理由がないため、reset-password と同じ考え方で緩く絞る。
+// スコープ名は reset-password とは別（"reset-token"）にして、カウンタを分ける。
+const RESET_TOKEN_IP_DAILY_LIMIT = 60;
 
 function invalidInput(): Response {
   return errorResponse("INVALID_INPUT", "入力が不正です", 400);
@@ -217,11 +227,55 @@ async function handleResetPassword(request: Request, env: AppEnv): Promise<Respo
   return json({ ok: true });
 }
 
+/**
+ * `GET /api/auth/reset-token?token=...`。
+ *
+ * パスワード再設定画面（`POST /api/auth/reset-password` を叩く直前の画面）は
+ * トークンしか持たず、メールアドレスを知らない。一方、鍵導出のソルトは
+ * メールアドレスから作られる（`src/lib/auth/kdf.ts` の `saltFor`）ため、
+ * 画面がメールアドレスを知らないままパスワードを再設定すると、次回ログイン時に
+ * 導出される鍵とソルトが食い違い、二度とログインできなくなる。この経路は
+ * サーバー側が鍵の由来を検証しないためテストでは検出できず、本番でしか
+ * 発覚しない。このエンドポイントは、画面がその場でメールアドレスを取得できる
+ * ようにするための照会用エンドポイント。
+ *
+ * トークンは256bitの秘密でメールの受信者しか持たないため、その持ち主に
+ * 自分のメールアドレスを返すことは新たな開示にならない。
+ *
+ * ⚠️ **トークンを消費しない。** `consumePasswordReset` ではなく
+ * `findEmailForValidPasswordReset`（照会専用、used_at を更新しない）を使う。
+ * ここでトークンを使用済みにしてしまうと、この後に続く本来の
+ * `POST /api/auth/reset-password` が RESET_TOKEN_INVALID で失敗する。
+ *
+ * 無効・期限切れ・使用済みのいずれも区別せず RESET_TOKEN_INVALID を返す
+ * （区別すると「このトークンは存在した」という情報が漏れる。
+ * `handleResetPassword` と同じ考え方）。
+ *
+ * IP別の緩いレート制限（60回/日）を先にかける。トークンを消費しないため
+ * 何度でも呼べてしまう経路をそのまま残す理由がないため。
+ */
+async function handleResetTokenLookup(request: Request, env: AppEnv): Promise<Response> {
+  const ip = request.headers.get("cf-connecting-ip");
+  if (!(await checkIpRateLimit(env, ip, "reset-token", RESET_TOKEN_IP_DAILY_LIMIT))) {
+    return rateLimited();
+  }
+
+  const url = new URL(request.url);
+  const token = url.searchParams.get("token");
+  if (!token) return resetTokenInvalid();
+
+  const email = await findEmailForValidPasswordReset(env.DB, await hashToken(token));
+  if (!email) return resetTokenInvalid();
+
+  return json({ email });
+}
+
 type Handler = (request: Request, env: AppEnv, ctx: ExecutionContext) => Promise<Response>;
 
 const ROUTES: Record<string, Handler> = {
   "POST /api/auth/forgot-password": handleForgotPassword,
   "POST /api/auth/reset-password": handleResetPassword,
+  "GET /api/auth/reset-token": handleResetTokenLookup,
 };
 
 const KNOWN_PATHS = new Set(Object.keys(ROUTES).map((key) => key.split(" ", 2)[1]));

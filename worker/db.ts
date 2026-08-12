@@ -129,6 +129,41 @@ export async function consumePasswordReset(
   return row ? row.user_id : null;
 }
 
+/**
+ * パスワード再設定トークンを**消費せずに**照会する。有効（未使用かつ期限内）なら、
+ * そのトークンに紐づくユーザーのメールアドレスを返す。
+ *
+ * ⚠️ `consumePasswordReset` とは別の関数にしてあること自体が不変条件。
+ * こちらは `used_at` を更新しない（SELECT のみ）。呼び出し側
+ * （`GET /api/auth/reset-token`）はトークンの持ち主に自分のメールアドレスを
+ * 確認させるための照会用エンドポイントであり、ここで使用済みにしてしまうと
+ * その後の本来の再設定（`POST /api/auth/reset-password`）が
+ * RESET_TOKEN_INVALID で失敗するようになる。
+ *
+ * `consumePasswordReset` と同じく「未使用かつ期限内」の判定条件を揃える
+ * （`used_at IS NULL AND expires_at > ?`）。存在しない／使用済み／期限切れの
+ * いずれであっても区別せず null を返す（区別すると「このトークンは存在した」
+ * という情報が漏れる）。
+ */
+export async function findEmailForValidPasswordReset(
+  db: D1Database,
+  tokenHash: string,
+  now: Date = new Date(),
+): Promise<string | null> {
+  const row = await db
+    .prepare(
+      `SELECT users.email AS email
+       FROM password_resets
+       JOIN users ON users.id = password_resets.user_id
+       WHERE password_resets.token_hash = ?
+         AND password_resets.used_at IS NULL
+         AND password_resets.expires_at > ?`,
+    )
+    .bind(tokenHash, now.toISOString())
+    .first<{ email: string }>();
+  return row ? row.email : null;
+}
+
 /** パスワードハッシュを更新する（再設定完了時）。 */
 export async function updatePasswordHash(
   db: D1Database,

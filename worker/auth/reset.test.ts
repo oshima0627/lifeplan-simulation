@@ -16,6 +16,7 @@ const KDF_VERSION = 1;
 const FORGOT_PASSWORD_EMAIL_DAILY_LIMIT = 5;
 const FORGOT_PASSWORD_IP_DAILY_LIMIT = 30;
 const RESET_PASSWORD_IP_DAILY_LIMIT = 60;
+const RESET_TOKEN_IP_DAILY_LIMIT = 60;
 
 interface FakeUserRow {
   id: string;
@@ -83,6 +84,16 @@ class FakeD1 {
         const [tokenHash] = args as [string];
         const row = this.resets.find((r) => r.tokenHash === tokenHash);
         return row ? ({ user_id: row.userId } as T) : null;
+      }
+      if (sql.startsWith("SELECT users.email AS email")) {
+        // findEmailForValidPasswordReset: 消費しない照会。used_at を書き換えない。
+        const [tokenHash, nowIso] = args as [string, string];
+        const row = this.resets.find(
+          (r) => r.tokenHash === tokenHash && r.usedAt === null && r.expiresAt > nowIso,
+        );
+        if (!row) return null;
+        const user = this.users.find((u) => u.id === row.userId);
+        return user ? ({ email: user.email } as T) : null;
       }
       throw new Error(`FakeD1: unhandled first() for "${sql}"`);
     };
@@ -251,6 +262,7 @@ async function errorCode(res: Response): Promise<string> {
 
 const FORGOT_URL = "https://lifeplan.example.com/api/auth/forgot-password";
 const RESET_URL = "https://lifeplan.example.com/api/auth/reset-password";
+const RESET_TOKEN_URL = "https://lifeplan.example.com/api/auth/reset-token";
 
 describe("forgot-password: 応答は常に 200 { ok: true }", () => {
   it("未登録アドレスでも登録済みアドレスでも応答が完全に同一", async () => {
@@ -672,6 +684,146 @@ describe("reset-password: IP別レート制限（60回/日、I-3）", () => {
         db,
         ns,
       );
+      expect(res.status).not.toBe(429);
+    }
+  });
+});
+
+describe("reset-token: パスワード再設定画面のためのメールアドレス照会（消費しない）", () => {
+  async function seedValidReset(db: FakeD1, userId: string, token: string): Promise<void> {
+    db.resets.push({
+      tokenHash: await hashToken(token),
+      userId,
+      expiresAt: new Date(Date.now() + RESET_TOKEN_TTL_MINUTES * 60 * 1000).toISOString(),
+      usedAt: null,
+    });
+  }
+
+  it("有効なトークンでメールアドレスが返る", async () => {
+    const db = new FakeD1();
+    db.users.push({ id: "user-1", email: "exists@example.com", passwordHash: "irrelevant" });
+    const token = "lookup-valid-token";
+    await seedValidReset(db, "user-1", token);
+
+    const res = await call(req("GET", `${RESET_TOKEN_URL}?token=${token}`), db);
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ email: "exists@example.com" });
+  });
+
+  it("期限切れのトークンは 400 RESET_TOKEN_INVALID（メールアドレスを返さない）", async () => {
+    const db = new FakeD1();
+    db.users.push({ id: "user-1", email: "exists@example.com", passwordHash: "irrelevant" });
+    const token = "lookup-expired-token";
+    db.resets.push({
+      tokenHash: await hashToken(token),
+      userId: "user-1",
+      expiresAt: new Date(Date.now() - 60_000).toISOString(),
+      usedAt: null,
+    });
+
+    const res = await call(req("GET", `${RESET_TOKEN_URL}?token=${token}`), db);
+
+    expect(res.status).toBe(400);
+    expect(await errorCode(res)).toBe("RESET_TOKEN_INVALID");
+    const text = await res.text();
+    expect(text).not.toContain("exists@example.com");
+  });
+
+  it("使用済みのトークンは 400 RESET_TOKEN_INVALID", async () => {
+    const db = new FakeD1();
+    db.users.push({ id: "user-1", email: "exists@example.com", passwordHash: "irrelevant" });
+    const token = "lookup-used-token";
+    db.resets.push({
+      tokenHash: await hashToken(token),
+      userId: "user-1",
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      usedAt: new Date().toISOString(),
+    });
+
+    const res = await call(req("GET", `${RESET_TOKEN_URL}?token=${token}`), db);
+
+    expect(res.status).toBe(400);
+    expect(await errorCode(res)).toBe("RESET_TOKEN_INVALID");
+  });
+
+  it("存在しないトークンは 400 RESET_TOKEN_INVALID", async () => {
+    const db = new FakeD1();
+    const res = await call(req("GET", `${RESET_TOKEN_URL}?token=never-issued`), db);
+
+    expect(res.status).toBe(400);
+    expect(await errorCode(res)).toBe("RESET_TOKEN_INVALID");
+  });
+
+  it("token パラメータが無ければ 400 RESET_TOKEN_INVALID", async () => {
+    const db = new FakeD1();
+    const res = await call(req("GET", RESET_TOKEN_URL), db);
+
+    expect(res.status).toBe(400);
+    expect(await errorCode(res)).toBe("RESET_TOKEN_INVALID");
+  });
+
+  it("照会してもトークンは消費されない（照会後に reset-password が成功する）", async () => {
+    const db = new FakeD1();
+    db.users.push({ id: "user-1", email: "exists@example.com", passwordHash: "old-hash" });
+    const token = "not-consumed-token";
+    await seedValidReset(db, "user-1", token);
+
+    // 同じトークンで何度照会しても、その後の本来の再設定は成功する
+    const lookup1 = await call(req("GET", `${RESET_TOKEN_URL}?token=${token}`), db);
+    const lookup2 = await call(req("GET", `${RESET_TOKEN_URL}?token=${token}`), db);
+    expect(lookup1.status).toBe(200);
+    expect(lookup2.status).toBe(200);
+
+    const resetRes = await call(
+      req("POST", RESET_URL, { body: { token, key: KEY, kdfVersion: KDF_VERSION } }),
+      db,
+    );
+
+    expect(resetRes.status).toBe(200);
+    expect(await resetRes.json()).toEqual({ ok: true });
+    expect(db.users[0]?.passwordHash).not.toBe("old-hash");
+  });
+
+  it("照会後にトークンが使用済みになっていない（used_at が更新されない）", async () => {
+    const db = new FakeD1();
+    db.users.push({ id: "user-1", email: "exists@example.com", passwordHash: "irrelevant" });
+    const token = "used-at-unchanged-token";
+    await seedValidReset(db, "user-1", token);
+
+    await call(req("GET", `${RESET_TOKEN_URL}?token=${token}`), db);
+
+    const expectedHash = await hashToken(token);
+    const persisted = db.resets.find((r) => r.tokenHash === expectedHash);
+    expect(persisted?.usedAt).toBeNull();
+  });
+
+  it("既知のパスに GET 以外でアクセスすると 405", async () => {
+    const db = new FakeD1();
+    const res = await call(req("POST", `${RESET_TOKEN_URL}?token=x`), db);
+    expect(res.status).toBe(405);
+  });
+
+  it("IP別レート制限（60回/日）を超えると 429 RATE_LIMITED", async () => {
+    const db = new FakeD1();
+    const { ns } = fakeRateLimiterNamespace();
+    const ip = "198.51.100.200";
+    let last: Response | undefined;
+
+    for (let i = 0; i < RESET_TOKEN_IP_DAILY_LIMIT + 1; i++) {
+      last = await call(req("GET", `${RESET_TOKEN_URL}?token=t-${i}`, { ip }), db, ns);
+    }
+
+    expect(last!.status).toBe(429);
+    expect(await errorCode(last!)).toBe("RATE_LIMITED");
+  });
+
+  it("cf-connecting-ip が無いときは何回呼んでも制限がかからない（ローカル開発対応）", async () => {
+    const db = new FakeD1();
+    const { ns } = fakeRateLimiterNamespace();
+
+    for (let i = 0; i < RESET_TOKEN_IP_DAILY_LIMIT + 1; i++) {
+      const res = await call(req("GET", `${RESET_TOKEN_URL}?token=t2-${i}`), db, ns);
       expect(res.status).not.toBe(429);
     }
   });
