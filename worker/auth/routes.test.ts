@@ -1,5 +1,6 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppEnv } from "../env";
+import type { KvStore } from "../rateLimit";
 import { hashToken } from "./session";
 import { handleAuthRoute } from "./routes";
 
@@ -14,6 +15,11 @@ import { handleAuthRoute } from "./routes";
 const KEY = "a".repeat(43);
 const OTHER_KEY = "b".repeat(43);
 const KDF_VERSION = 1;
+
+// routes.ts のプライベート定数と同じ値。routes.ts が非公開なのでここで複製する
+// （変えるときはこちらも一緒に直す）。
+const SIGNUP_IP_DAILY_LIMIT = 10;
+const LOGIN_IP_DAILY_LIMIT = 30;
 
 interface FakeUserRow {
   id: string;
@@ -85,22 +91,63 @@ class FakeD1 {
   };
 }
 
-function makeEnv(db: FakeD1): AppEnv {
+/** env.RATE_LIMIT のスタブ。Map ベースの素朴な実装（worker/rateLimit.test.ts と同型）。 */
+function fakeRateLimitKv(): KvStore {
+  const store = new Map<string, string>();
+  return {
+    async get(key) {
+      return store.get(key) ?? null;
+    },
+    async put(key, value) {
+      store.set(key, value);
+    },
+  };
+}
+
+function turnstileSiteverifyResponse(success: boolean): Response {
+  return new Response(JSON.stringify({ success }), {
+    status: 200,
+    headers: { "content-type": "application/json" },
+  });
+}
+
+// Turnstile 検証（worker/turnstile.ts）はグローバル fetch を叩く。routes.ts 側は
+// fetchImpl を差し替えられないので、既定では「常に成功する」よう毎テスト前に
+// グローバル fetch をスタブする。Turnstile 自体の失敗系を見たいテストだけ、
+// その場で vi.stubGlobal を呼び直して上書きする。
+//
+// ⚠️ `mockResolvedValue` ではなく `mockImplementation` を使うこと。
+// `Response` はボディを一度しか読めないため、同一の Response インスタンスを
+// 使い回す `mockResolvedValue` だと、signup を複数回呼ぶテスト（重複メール・
+// レート制限の連続呼び出しなど）で2回目以降の `res.json()` が
+// 「ボディを読み尽くした」例外を投げ、Turnstile 検証が意図せず false になる。
+beforeEach(() => {
+  vi.stubGlobal("fetch", vi.fn().mockImplementation(async () => turnstileSiteverifyResponse(true)));
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
+function makeEnv(db: FakeD1, rateLimitKv: KvStore = fakeRateLimitKv()): AppEnv {
   return {
     ASSETS: { fetch: vi.fn() } as unknown as AppEnv["ASSETS"],
     DB: db as unknown as AppEnv["DB"],
     MAIL_FROM: "ライフプランシミュレーター <noreply@nexeed-lab.com>",
     RESEND_API_KEY: "test-unused",
+    RATE_LIMIT: rateLimitKv as unknown as AppEnv["RATE_LIMIT"],
+    TURNSTILE_SECRET_KEY: "test-turnstile-secret",
   };
 }
 
 function req(
   method: string,
   url: string,
-  opts: { body?: unknown; rawBody?: string; cookie?: string } = {},
+  opts: { body?: unknown; rawBody?: string; cookie?: string; ip?: string } = {},
 ): Request {
   const headers: Record<string, string> = {};
   if (opts.cookie) headers.cookie = opts.cookie;
+  if (opts.ip) headers["cf-connecting-ip"] = opts.ip;
   if (opts.body !== undefined || opts.rawBody !== undefined) {
     headers["content-type"] = "application/json";
   }
@@ -111,15 +158,22 @@ function req(
   });
 }
 
-async function call(request: Request, db: FakeD1): Promise<Response> {
-  const env = makeEnv(db);
+/**
+ * @param rateLimitKv 複数回の呼び出しでレート制限カウンタを積み上げたいときだけ、
+ *   同じ KvStore を明示的に使い回す。省略時は呼び出しごとに新しい（空の）KVになる
+ *   ので、通常の単発テストではレート制限が一切影響しない。
+ */
+async function call(request: Request, db: FakeD1, rateLimitKv?: KvStore): Promise<Response> {
+  const env = makeEnv(db, rateLimitKv);
   const res = await handleAuthRoute(request, env, new URL(request.url));
   if (!res) throw new Error("handleAuthRoute returned null for a known auth path");
   return res;
 }
 
 function signupBody(email: string, key = KEY) {
-  return { email, key, kdfVersion: KDF_VERSION };
+  // turnstileToken: Turnstile 検証はテスト既定でグローバル fetch スタブにより
+  // 常に成功する（beforeEach 参照）。文字列でさえあれば内容は何でもよい。
+  return { email, key, kdfVersion: KDF_VERSION, turnstileToken: "valid-turnstile-token" };
 }
 
 /**
@@ -277,7 +331,11 @@ describe("不正な入力で例外が漏れない", () => {
   it("フィールドが欠けていても例外を投げず 400 を返す", async () => {
     const db = new FakeD1();
     const res = await call(
-      req("POST", "https://lifeplan.example.com/api/auth/signup", { body: {} }),
+      // turnstileToken だけは入れておく（無いと Turnstile 検証の403が先に返り、
+      // このテストが確かめたい「email/key欠如→400」を検証できなくなるため）
+      req("POST", "https://lifeplan.example.com/api/auth/signup", {
+        body: { turnstileToken: "valid-turnstile-token" },
+      }),
       db,
     );
     expect(res.status).toBe(400);
@@ -377,5 +435,138 @@ describe("Secure 属性はホスト名で決まる（I-1 の再発防止）", ()
       db,
     );
     expect(res.headers.get("set-cookie")).toContain("Secure");
+  });
+});
+
+describe("signup: Turnstile 検証（D1に触る前に行う）", () => {
+  it("Turnstile 検証に失敗したら 403 になり、users に行が増えない", async () => {
+    const db = new FakeD1();
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(turnstileSiteverifyResponse(false)));
+
+    const res = await call(
+      req("POST", "https://lifeplan.example.com/api/auth/signup", {
+        body: signupBody("blocked-by-turnstile@example.com"),
+      }),
+      db,
+    );
+
+    expect(res.status).toBe(403);
+    expect(db.users).toHaveLength(0);
+  });
+
+  it("turnstileToken が無ければ fetch を呼ばずに 403 になり、users に行が増えない", async () => {
+    const db = new FakeD1();
+    const fetchImpl = vi.fn();
+    vi.stubGlobal("fetch", fetchImpl);
+
+    const res = await call(
+      req("POST", "https://lifeplan.example.com/api/auth/signup", {
+        body: { email: "no-token@example.com", key: KEY, kdfVersion: KDF_VERSION },
+      }),
+      db,
+    );
+
+    expect(res.status).toBe(403);
+    expect(db.users).toHaveLength(0);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+});
+
+describe("signup: IP別レート制限（1日10回まで）", () => {
+  it("同一IPから11回目は 429 / RATE_LIMITED になる", async () => {
+    const db = new FakeD1();
+    const kv = fakeRateLimitKv();
+    let last: Response | undefined;
+
+    for (let i = 0; i < SIGNUP_IP_DAILY_LIMIT + 1; i++) {
+      last = await call(
+        req("POST", "https://lifeplan.example.com/api/auth/signup", {
+          body: signupBody(`rl-signup-${i}@example.com`),
+          ip: "203.0.113.10",
+        }),
+        db,
+        kv,
+      );
+    }
+
+    expect(last!.status).toBe(429);
+    expect(await errorCode(last!)).toBe("RATE_LIMITED");
+    // 10回目までは通っているはず（11回目だけが拒否）
+    expect(db.users).toHaveLength(SIGNUP_IP_DAILY_LIMIT);
+  });
+
+  it("レート制限の応答に理由が含まれない（メッセージにIPや上限といった語を出さない）", async () => {
+    const db = new FakeD1();
+    const kv = fakeRateLimitKv();
+    let last: Response | undefined;
+
+    for (let i = 0; i < SIGNUP_IP_DAILY_LIMIT + 1; i++) {
+      last = await call(
+        req("POST", "https://lifeplan.example.com/api/auth/signup", {
+          body: signupBody(`rl-reason-${i}@example.com`),
+          ip: "203.0.113.11",
+        }),
+        db,
+        kv,
+      );
+    }
+
+    const body = JSON.parse(await last!.text());
+    expect(body.error.code).toBe("RATE_LIMITED");
+    expect(body.error.message).not.toMatch(/IP|アドレス|上限|回数/);
+  });
+
+  it("cf-connecting-ip が無いときは何回呼んでも制限がかからない（ローカル開発対応）", async () => {
+    const db = new FakeD1();
+    const kv = fakeRateLimitKv();
+
+    for (let i = 0; i < SIGNUP_IP_DAILY_LIMIT + 1; i++) {
+      const res = await call(
+        req("POST", "https://lifeplan.example.com/api/auth/signup", {
+          body: signupBody(`no-ip-${i}@example.com`),
+        }),
+        db,
+        kv,
+      );
+      expect(res.status).not.toBe(429);
+    }
+  });
+});
+
+describe("login: IP別レート制限（1日30回まで）", () => {
+  it("同一IPから31回目は 429 / RATE_LIMITED になる", async () => {
+    const db = new FakeD1();
+    const kv = fakeRateLimitKv();
+    let last: Response | undefined;
+
+    for (let i = 0; i < LOGIN_IP_DAILY_LIMIT + 1; i++) {
+      last = await call(
+        req("POST", "https://lifeplan.example.com/api/auth/login", {
+          body: { email: "nobody@example.com", key: KEY, kdfVersion: KDF_VERSION },
+          ip: "198.51.100.20",
+        }),
+        db,
+        kv,
+      );
+    }
+
+    expect(last!.status).toBe(429);
+    expect(await errorCode(last!)).toBe("RATE_LIMITED");
+  });
+
+  it("cf-connecting-ip が無いときは何回呼んでも制限がかからない（ローカル開発対応）", async () => {
+    const db = new FakeD1();
+    const kv = fakeRateLimitKv();
+
+    for (let i = 0; i < LOGIN_IP_DAILY_LIMIT + 1; i++) {
+      const res = await call(
+        req("POST", "https://lifeplan.example.com/api/auth/login", {
+          body: { email: "nobody@example.com", key: KEY, kdfVersion: KDF_VERSION },
+        }),
+        db,
+        kv,
+      );
+      expect(res.status).not.toBe(429);
+    }
   });
 });

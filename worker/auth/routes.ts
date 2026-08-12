@@ -8,8 +8,14 @@ import { buildSetCookie, readCookie, SESSION_COOKIE } from "../cookies";
 import { createSession, createUser, deleteSession, findUserByEmail, findUserIdBySession } from "../db";
 import type { AppEnv } from "../env";
 import { errorResponse, json } from "../http";
+import { checkAndBump, hashForKey, todayUtc } from "../rateLimit";
+import { verifyTurnstile } from "../turnstile";
 import { hashClientKey, readClientKeyInput, verifyClientKey } from "./password";
 import { hashToken, newSessionToken, sessionExpiryIso, SESSION_TTL_DAYS } from "./session";
+
+// IP別・1日あたりの上限（設計書 §7.1 の考え方に合わせる）
+const SIGNUP_IP_DAILY_LIMIT = 10;
+const LOGIN_IP_DAILY_LIMIT = 30;
 
 /**
  * login の失敗文言。「ユーザーが存在しない」場合と「鍵が違う」場合とで
@@ -42,6 +48,45 @@ function emailTaken(): Response {
 
 function invalidInput(): Response {
   return errorResponse("INVALID_INPUT", "入力が不正です", 400);
+}
+
+/** Turnstile 検証に失敗したときの応答。`users` に行を作る前に返す（D1に触らない）。 */
+function turnstileFailure(): Response {
+  return errorResponse(
+    "TURNSTILE_FAILED",
+    "確認に失敗しました。ページを再読み込みしてからもう一度お試しください",
+    403,
+  );
+}
+
+/**
+ * レート制限に引っかかったときの応答。
+ *
+ * ⚠️ コードも文言もこの1本に統一する。「IPの上限に達した」のか他の理由なのかを
+ * 応答から判別できるようにしてしまうと、攻撃者に制限の仕組みそのものを
+ * 教えることになる。
+ */
+function rateLimited(): Response {
+  return errorResponse("RATE_LIMITED", "しばらく時間をおいてから再度お試しください", 429);
+}
+
+/**
+ * IP別の日次レート制限を確認し、カウンタを進める。許可なら true。
+ *
+ * ⚠️ `cf-connecting-ip` が取れない場合は制限をかけない（常に true）。
+ * 本番では Cloudflare がリクエストへ必ずこのヘッダーを付与するため、
+ * 取れないのは `wrangler dev` などのローカル開発時だけ。ここで一律に
+ * 弾いてしまうとローカル開発そのものができなくなるため、意図的に許可側へ倒す。
+ */
+async function checkIpRateLimit(
+  env: AppEnv,
+  ip: string | null,
+  scope: string,
+  limit: number,
+): Promise<boolean> {
+  if (!ip) return true;
+  const key = `rl:${scope}:${todayUtc()}:${await hashForKey(ip)}`;
+  return checkAndBump(env.RATE_LIMIT, key, limit);
 }
 
 /** リクエストボディを安全に JSON として読む。壊れた本文でも例外を投げない。 */
@@ -96,6 +141,15 @@ async function handleSignup(request: Request, env: AppEnv): Promise<Response> {
   const body = await readJsonBody(request);
   if (!body) return invalidInput();
 
+  const ip = request.headers.get("cf-connecting-ip");
+
+  // Turnstile の検証は D1 に触る前に行う。後にすると、検証を通らない
+  // リクエストでも（メール重複チェックなどの）DB負荷をかけられてしまう。
+  const turnstileOk = await verifyTurnstile(body.turnstileToken, env.TURNSTILE_SECRET_KEY, ip ?? undefined);
+  if (!turnstileOk) return turnstileFailure();
+
+  if (!(await checkIpRateLimit(env, ip, "signup", SIGNUP_IP_DAILY_LIMIT))) return rateLimited();
+
   // クライアントの正規化を信用しない。サーバー側で必ず再正規化する
   const email = normalizeEmail(body.email);
   const keyInput = readClientKeyInput(body);
@@ -117,6 +171,9 @@ async function handleSignup(request: Request, env: AppEnv): Promise<Response> {
 async function handleLogin(request: Request, env: AppEnv): Promise<Response> {
   const body = await readJsonBody(request);
   if (!body) return invalidInput();
+
+  const ip = request.headers.get("cf-connecting-ip");
+  if (!(await checkIpRateLimit(env, ip, "login", LOGIN_IP_DAILY_LIMIT))) return rateLimited();
 
   const email = normalizeEmail(body.email);
   const keyInput = readClientKeyInput(body);

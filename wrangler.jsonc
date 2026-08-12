@@ -25,6 +25,9 @@
       "migrations_dir": "d1/migrations"
     }
   ],
+  "kv_namespaces": [
+    { "binding": "RATE_LIMIT", "id": "9dd830bf032343e6a9513a1fd5ed4a28" }
+  ],
   "observability": {
     "enabled": true,
     "head_sampling_rate": 1

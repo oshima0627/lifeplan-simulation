@@ -27,6 +27,8 @@ function makeEnv(): AppEnv {
     DB: {} as never,
     MAIL_FROM: "ライフプランシミュレーター <noreply@nexeed-lab.com>",
     RESEND_API_KEY: "test-unused",
+    RATE_LIMIT: {} as never,
+    TURNSTILE_SECRET_KEY: "test-unused",
   };
 }
 
