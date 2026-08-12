@@ -526,3 +526,37 @@ metadata（`app=lifeplan`）で絞る。
 `GET /v1/billing_portal/configurations` しか公開しておらず、
 `PostBillingPortalConfigurations` は "not available" を返す。
 `scripts/setup-stripe.mjs` から作る（`STRIPE_SECRET_KEY` が要る）。
+
+### カスタマーポータルはブラウザから設定した（テストモード）
+
+MCP に作成操作が無いため、ダッシュボードから設定して保存した。
+保存すると設定が1つ作られる（`bpc_1U3kkUKTnrLfYvHyYAcetmKq`・active・既定）。
+
+API で確認した内容:
+
+| 機能 | 値 |
+| --- | --- |
+| `subscription_cancel` | 有効・**`mode: "at_period_end"`** |
+| `invoice_history` | 有効 |
+| `payment_method_update` | 有効 |
+| `customer_update` | 有効（name / email / address / phone） |
+| `default_return_url` | `https://lifeplan.nexeed-lab.com/account` |
+
+**`at_period_end` が要点。** ダッシュボードの既定でもこれが選ばれていた。
+`immediately` にすると、その月の料金を払っているのに即座に使えなくなるうえ、
+`worker/billing/entitlement.ts` の判定（`canceled` は権利なし /
+`active` + `cancel_at_period_end` は権利あり）とも食い違う。
+
+`default_return_url` は保険。コード側は毎回 `return_url` を渡している。
+
+**⚠️ `business_profile.privacy_policy_url` と `terms_of_service_url` は null のまま。**
+ダッシュボードではこの2つを「公開事業情報」ページで管理する作りになっており、
+ポータル設定の画面からは入力できない。テストモードでは不要だが、
+**本番モードでは両方必須。** 利用規約はサブプロジェクト D で作る。
+
+### テストモードの設定は本番に引き継がれない
+
+ダッシュボードに明記されている:
+「以下の設定の変更はテスト環境にのみ適用されます。本番環境のカスタマーポータルを
+設定するには、テスト環境をオフに切り替えてください。」
+**商品・価格・Webhook・ポータル設定のすべてを本番モードで作り直す。**
