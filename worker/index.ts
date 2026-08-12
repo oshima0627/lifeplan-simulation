@@ -1,4 +1,5 @@
-import type { Env } from "./env";
+import { handleAuthRoute } from "./auth/routes";
+import type { AppEnv } from "./env";
 import { errorResponse, json } from "./http";
 
 /**
@@ -13,7 +14,7 @@ import { errorResponse, json } from "./http";
  * 普通に使っている限り気づけない。**
  */
 const worker = {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(request: Request, env: AppEnv): Promise<Response> {
     const url = new URL(request.url);
 
     if (!url.pathname.startsWith("/api/")) {
@@ -34,6 +35,9 @@ const worker = {
         return json({ ok: true });
       }
 
+      const authResponse = await handleAuthRoute(request, env, url);
+      if (authResponse) return authResponse;
+
       return errorResponse("NOT_FOUND", "エンドポイントが存在しません", 404);
     } catch (err) {
       // 例外の生メッセージは応答に含めない（設定の不備やDBの構造が外に漏れる）。
@@ -42,6 +46,6 @@ const worker = {
       return errorResponse("INTERNAL_ERROR", "サーバーエラーが発生しました", 500);
     }
   },
-} satisfies ExportedHandler<Env>;
+} satisfies ExportedHandler<AppEnv>;
 
 export default worker;

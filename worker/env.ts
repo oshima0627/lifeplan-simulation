@@ -1,15 +1,17 @@
 /**
- * Worker が受け取るバインディングとシークレットの形。
+ * `wrangler types` の生成物（worker/worker-configuration.d.ts、グローバルな
+ * `Env`）を拡張する。
  *
- * ⚠️ シークレットは `wrangler.jsonc` の `vars` に置かない（平文でダッシュボードから
- * 見える）。`wrangler secret put` で投入する。この型に足すのは名前だけで、
- * 値をコードに書かないこと（docs/superpowers/specs/2026-08-12-paid-ai-advisor-design.md §7 相当）。
+ * 生成物は `wrangler.jsonc` の `vars` / バインディングと `.dev.vars` から
+ * 作られるため、`RESEND_API_KEY` のような **シークレット**（`wrangler secret
+ * put` で投入し、値を `wrangler.jsonc` にも `.dev.vars` にも書かない）は
+ * 生成物に現れない。
  *
- * A-1 の時点ではシークレットを使わないので、バインディングだけを持つ。
+ * 生成ファイル（worker/worker-configuration.d.ts）を直接編集すると
+ * `npm run cf:typegen` の再生成で消えるため、ここで拡張する形にする。
+ * **値をこのファイルに書かないこと**（Cloudflare ダッシュボードから見える
+ * 場所に置かない）。
  */
-export interface Env {
-  /** 静的アセット。/api/* 以外のリクエストはここに委ねる */
-  ASSETS: Fetcher;
-  /** 認証・課金・利用回数を保存する D1（家計情報は入れない） */
-  DB: D1Database;
+export interface AppEnv extends Env {
+  RESEND_API_KEY: string;
 }

@@ -11,7 +11,8 @@
     "deploy": "next build && wrangler deploy",
     "preview": "next build && wrangler dev",
     "db:migrate:local": "wrangler d1 migrations apply lifeplan --local",
-    "db:migrate:remote": "wrangler d1 migrations apply lifeplan --remote"
+    "db:migrate:remote": "wrangler d1 migrations apply lifeplan --remote",
+    "cf:typegen": "wrangler types --env-interface Env worker/worker-configuration.d.ts"
   },
   "dependencies": {
     "next": "16.2.12",

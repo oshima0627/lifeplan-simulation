@@ -12,31 +12,23 @@
  * 文言を出さないようにするため（呼び出し側は true/false だけを見て、
  * 未登録の場合と同じ形の応答を返す）。
  *
- * 重複判定は users.email の UNIQUE 制約違反を捕まえて行う。D1（SQLite）は
- * 制約違反時に投げる Error の message に "UNIQUE constraint failed" を含むため、
- * それを目印にする。それ以外のエラー（DB接続断など）は握りつぶさずそのまま
- * 投げ直す — でないと本当の障害まで「メール重複」として飲み込んでしまう。
+ * 重複判定は `INSERT OR IGNORE` の `changes` で行う。単一SQL文なので
+ * SQLiteエンジン内で原子的に処理され、競合状態にも強い。`users` には
+ * `UNIQUE(email)` 以外の一意制約が無いため、`changes === 0` の原因は
+ * 重複以外にありえない。接続断などの本当の異常は `run()` 自体が reject
+ * するので、そちらは握りつぶさずそのまま投げ直る。
  */
 export async function createUser(
   db: D1Database,
   input: { id: string; email: string; passwordHash: string },
 ): Promise<boolean> {
-  try {
-    await db
-      .prepare(
-        "INSERT INTO users (id, email, password_hash, created_at) VALUES (?, ?, ?, ?)",
-      )
-      .bind(input.id, input.email, input.passwordHash, new Date().toISOString())
-      .run();
-    return true;
-  } catch (err) {
-    if (isUniqueConstraintError(err)) return false;
-    throw err;
-  }
-}
-
-function isUniqueConstraintError(err: unknown): boolean {
-  return err instanceof Error && err.message.includes("UNIQUE constraint failed");
+  const result = await db
+    .prepare(
+      "INSERT OR IGNORE INTO users (id, email, password_hash, created_at) VALUES (?, ?, ?, ?)",
+    )
+    .bind(input.id, input.email, input.passwordHash, new Date().toISOString())
+    .run();
+  return result.meta.changes > 0;
 }
 
 /** メールアドレス（正規化済み前提）でユーザーを引く。見つからなければ null。 */

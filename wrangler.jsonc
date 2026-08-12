@@ -25,6 +25,14 @@
       "migrations_dir": "d1/migrations"
     }
   ],
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  },
+  "vars": {
+    // 公開値なのでシークレットにしない。RESEND_API_KEY は絶対にここへ置かない
+    "MAIL_FROM": "ライフプランシミュレーター <noreply@nexeed-lab.com>"
+  },
   "routes": [
     {
       "pattern": "lifeplan.nexeed-lab.com",

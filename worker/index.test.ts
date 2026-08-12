@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { Env } from "./env";
+import type { AppEnv } from "./env";
 
 /**
  * `/api/health` 自体は例外を投げない（現時点では顕在化しないバグのため）。
@@ -21,10 +21,12 @@ vi.mock("./http", async () => {
 
 const { default: worker } = await import("./index");
 
-function makeEnv(): Env {
+function makeEnv(): AppEnv {
   return {
-    ASSETS: { fetch: vi.fn() } as unknown as Env["ASSETS"],
+    ASSETS: { fetch: vi.fn() } as unknown as AppEnv["ASSETS"],
     DB: {} as never,
+    MAIL_FROM: "ライフプランシミュレーター <noreply@nexeed-lab.com>",
+    RESEND_API_KEY: "test-unused",
   };
 }
 
