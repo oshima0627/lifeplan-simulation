@@ -520,7 +520,14 @@ Spend Limit（日） は撤廃、または 月上限の 1/5 以上
 
 既存の `nexeed-lab-db` は使わない。**専用のD1を新規作成する。**
 
+どのテーブルがどのサブプロジェクトで入るかを1行ずつ添える。
+
+- `users` / `sessions` / `password_resets` … サブプロジェクトA（認証の土台）
+- `subscriptions` / `usage_monthly` / `processed_events` … サブプロジェクトB（課金・利用回数。
+  現時点では**未実装**。存在しないのは設計どおり正しい）
+
 ```sql
+-- サブプロジェクトA
 CREATE TABLE users (
   id            TEXT PRIMARY KEY,
   email         TEXT NOT NULL UNIQUE,   -- 正規化済み（小文字・trim）
@@ -528,13 +535,26 @@ CREATE TABLE users (
   created_at    TEXT NOT NULL
 );
 
+-- サブプロジェクトA
 CREATE TABLE sessions (
   token_hash TEXT PRIMARY KEY,          -- 生トークンは保存しない
   user_id    TEXT NOT NULL REFERENCES users(id),
   expires_at TEXT NOT NULL
 );
 CREATE INDEX idx_sessions_user ON sessions(user_id);
+-- 期限切れの一括削除で使う
+CREATE INDEX idx_sessions_expires ON sessions(expires_at);
 
+-- サブプロジェクトA（パスワード再設定）
+CREATE TABLE password_resets (
+  token_hash TEXT PRIMARY KEY,          -- セッションと同じく、生トークンは保存しない
+  user_id    TEXT NOT NULL REFERENCES users(id),
+  expires_at TEXT NOT NULL,
+  used_at    TEXT                       -- 使用済みを記録する。NULL なら未使用
+);
+CREATE INDEX idx_password_resets_user ON password_resets(user_id);
+
+-- サブプロジェクトB（未実装）
 CREATE TABLE subscriptions (
   user_id              TEXT PRIMARY KEY REFERENCES users(id),
   stripe_customer_id   TEXT NOT NULL,
@@ -544,7 +564,7 @@ CREATE TABLE subscriptions (
   updated_at           TEXT NOT NULL
 );
 
--- 月100回と、お試し月1回の両方をここで数える
+-- サブプロジェクトB（未実装）。月100回と、お試し月1回の両方をここで数える
 CREATE TABLE usage_monthly (
   user_id    TEXT NOT NULL REFERENCES users(id),
   year_month TEXT NOT NULL,             -- "2026-08"（JST基準）
@@ -552,7 +572,7 @@ CREATE TABLE usage_monthly (
   PRIMARY KEY (user_id, year_month)
 );
 
--- Webhook の冪等性を担保する。処理済みイベントは二度と適用しない
+-- サブプロジェクトB（未実装）。Webhook の冪等性を担保する。処理済みイベントは二度と適用しない
 CREATE TABLE processed_events (
   event_id     TEXT PRIMARY KEY,
   processed_at TEXT NOT NULL

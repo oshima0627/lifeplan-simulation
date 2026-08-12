@@ -17,6 +17,17 @@ describe("json", () => {
     // 認証状態を含む応答が中間キャッシュに残ると、別人に配られる
     expect(json({ ok: true }).headers.get("cache-control")).toBe("no-store");
   });
+
+  it("追加ヘッダを載せられる（例: login の Set-Cookie）", () => {
+    const res = json({ ok: true }, 200, { "set-cookie": "session=abc; HttpOnly" });
+    expect(res.headers.get("set-cookie")).toBe("session=abc; HttpOnly");
+  });
+
+  it("呼び出し側が cache-control を渡しても BASE_HEADERS が勝つ", () => {
+    // 呼び出し側の書き間違い（例: cache-control: public）でも上書きされない
+    const res = json({ ok: true }, 200, { "cache-control": "public, max-age=3600" });
+    expect(res.headers.get("cache-control")).toBe("no-store");
+  });
 });
 
 describe("errorResponse", () => {
@@ -30,5 +41,17 @@ describe("errorResponse", () => {
 
   it("キャッシュを禁止する", () => {
     expect(errorResponse("X", "y", 400).headers.get("cache-control")).toBe("no-store");
+  });
+
+  it("追加ヘッダを載せられる（例: レート制限の Retry-After）", () => {
+    const res = errorResponse("RATE_LIMITED", "しばらく待ってください", 429, {
+      "retry-after": "30",
+    });
+    expect(res.headers.get("retry-after")).toBe("30");
+  });
+
+  it("呼び出し側が cache-control を渡しても BASE_HEADERS が勝つ", () => {
+    const res = errorResponse("X", "y", 400, { "cache-control": "public, max-age=3600" });
+    expect(res.headers.get("cache-control")).toBe("no-store");
   });
 });

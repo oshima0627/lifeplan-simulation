@@ -20,16 +20,27 @@ const worker = {
       return env.ASSETS.fetch(request);
     }
 
-    // 疎通確認用。ルーティングが効いているかを本番で見るためだけに置く。
-    // GET 以外を弾いておくのは、以後のエンドポイントで同じ作法を使うため
-    if (url.pathname === "/api/health") {
-      if (request.method !== "GET") {
-        return errorResponse("METHOD_NOT_ALLOWED", "許可されていないメソッドです", 405);
+    // ここから先で投げられた例外は必ずこの catch を通る。
+    // 「全応答が http.ts (json / errorResponse) を通る」という不変条件の
+    // 唯一の抜け道が「例外が投げっぱなしになり Cloudflare の既定のエラーページ
+    // （cache-control 無し・本文が JSON でない）が返る」ケースだったため塞ぐ。
+    try {
+      // 疎通確認用。ルーティングが効いているかを本番で見るためだけに置く。
+      // GET 以外を弾いておくのは、以後のエンドポイントで同じ作法を使うため
+      if (url.pathname === "/api/health") {
+        if (request.method !== "GET") {
+          return errorResponse("METHOD_NOT_ALLOWED", "許可されていないメソッドです", 405);
+        }
+        return json({ ok: true });
       }
-      return json({ ok: true });
-    }
 
-    return errorResponse("NOT_FOUND", "エンドポイントが存在しません", 404);
+      return errorResponse("NOT_FOUND", "エンドポイントが存在しません", 404);
+    } catch (err) {
+      // 例外の生メッセージは応答に含めない（設定の不備やDBの構造が外に漏れる）。
+      // 原因は運用ログにだけ残す。
+      console.error(err);
+      return errorResponse("INTERNAL_ERROR", "サーバーエラーが発生しました", 500);
+    }
   },
 } satisfies ExportedHandler<Env>;
 

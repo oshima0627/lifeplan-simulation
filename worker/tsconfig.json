@@ -11,7 +11,12 @@
   "extends": "../tsconfig.json",
   "compilerOptions": {
     "lib": ["ES2022"],
-    "types": ["@cloudflare/workers-types"]
+    "types": ["@cloudflare/workers-types"],
+    // 親 (tsconfig.json) の "paths": { "@/*": ["./src/*"] } を継承させない。
+    // 継承されたままだと worker/ から `@/` で src/ を import しても型検査が
+    // 通ってしまい、「Worker のコードから @/ を使わない（相対パスで書く）」という
+    // 決まりが型検査で一切守られなくなる（I-3）。
+    "paths": {}
   },
   "include": ["**/*.ts"],
   "exclude": ["../node_modules"]
