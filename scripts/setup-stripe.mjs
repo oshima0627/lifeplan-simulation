@@ -108,13 +108,41 @@ async function main() {
     await putSecret("STRIPE_WEBHOOK_SECRET", created.secret);
   }
 
+  // --- カスタマーポータル ---
+  // 解約導線（/api/billing/portal）はこの設定が1つ有効になっていないと動かない。
+  // ダッシュボードで有効化する代わりにここで作る。
+  const configs = await stripe.billingPortal.configurations.list({ limit: 10 });
+  if (configs.data.some((c) => c.active)) {
+    console.log("カスタマーポータルは設定済みです。");
+  } else {
+    const portal = await stripe.billingPortal.configurations.create({
+      business_profile: {
+        privacy_policy_url: "https://lifeplan.nexeed-lab.com/privacy",
+        // ⚠️ 利用規約はサブプロジェクト D で作る。**本番受付の前に必ず用意して
+        // ここへ足すこと。** Stripe は本番モードのポータル有効化で
+        // プライバシーポリシーと利用規約の両方を求める
+      },
+      features: {
+        invoice_history: { enabled: true },
+        payment_method_update: { enabled: true },
+        subscription_cancel: {
+          enabled: true,
+          // ⚠️ `immediately` にしない。その月の料金を払っているのに
+          // 即座に使えなくなる。`at_period_end` なら Stripe 側は期末まで
+          // status=active・cancel_at_period_end=true を保ち、
+          // worker/billing/entitlement.ts の判定と一致する
+          mode: "at_period_end",
+        },
+      },
+    });
+    console.log(`カスタマーポータルを設定しました: ${portal.id}`);
+  }
+
   console.log("");
   console.log("--- 次にやること ---");
-  console.log(`1. wrangler.jsonc の vars.STRIPE_PRICE_ID を "${price.id}" に差し替える`);
+  console.log(`1. wrangler.jsonc の vars.STRIPE_PRICE_ID が "${price.id}" になっているか確認する`);
   console.log("2. npx wrangler secret put STRIPE_SECRET_KEY  （この鍵を貼り付ける）");
   console.log("3. npx wrangler deploy");
-  console.log("4. Stripe ダッシュボード → 設定 → Billing → カスタマーポータル を有効化");
-  console.log("   （解約導線が /api/billing/portal 経由でこれに依存しています）");
 }
 
 /** 値を画面に出さずに `wrangler secret put` の標準入力へ流し込む。 */

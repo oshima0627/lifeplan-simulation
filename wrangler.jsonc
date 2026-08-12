@@ -52,8 +52,11 @@
     // 金額をコードに書かないことで、値上げ・値下げが Stripe 側だけで完結する。
     // ⚠️ STRIPE_SECRET_KEY / STRIPE_WEBHOOK_SECRET は絶対にここへ置かない
     // （ダッシュボードから平文で見える）。wrangler secret put で投入する。
-    // TODO(利用者本人): Stripe で月額1,980円の Price を作り、その ID に差し替える
-    "STRIPE_PRICE_ID": "price_REPLACE_ME"
+    // ⚠️ これは**テストモード**の Price ID。Price はモードごとに別物なので、
+    // 本番受付を始めるときは livemode の ID に差し替えて再デプロイすること
+    // （`node scripts/setup-stripe.mjs` を live の鍵で実行すると作成される）。
+    // 差し替え忘れると、本番の鍵でテストの Price を指してエラーになる。
+    "STRIPE_PRICE_ID": "price_1U3kIiKTnrLfYvHymjDohcMn"
   },
   // `routes` が1件あれば wrangler は workers_dev を暗黙に無効化するが、
   // その暗黙の挙動に安全性（再設定リンクのオリジンがぶれないこと）を
