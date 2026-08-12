@@ -9,7 +9,9 @@
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "deploy": "next build && wrangler deploy",
-    "preview": "next build && wrangler dev"
+    "preview": "next build && wrangler dev",
+    "db:migrate:local": "wrangler d1 migrations apply lifeplan --local",
+    "db:migrate:remote": "wrangler d1 migrations apply lifeplan --remote"
   },
   "dependencies": {
     "next": "16.2.12",
