@@ -15,7 +15,7 @@ import { errorResponse, json } from "./http";
  * 普通に使っている限り気づけない。**
  */
 const worker = {
-  async fetch(request: Request, env: AppEnv): Promise<Response> {
+  async fetch(request: Request, env: AppEnv, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
 
     if (!url.pathname.startsWith("/api/")) {
@@ -39,7 +39,7 @@ const worker = {
       const authResponse = await handleAuthRoute(request, env, url);
       if (authResponse) return authResponse;
 
-      const resetResponse = await handleResetRoute(request, env, url);
+      const resetResponse = await handleResetRoute(request, env, url, ctx);
       if (resetResponse) return resetResponse;
 
       return errorResponse("NOT_FOUND", "エンドポイントが存在しません", 404);

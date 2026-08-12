@@ -134,6 +134,7 @@ function makeEnv(db: FakeD1, rateLimitKv: KvStore = fakeRateLimitKv()): AppEnv {
     ASSETS: { fetch: vi.fn() } as unknown as AppEnv["ASSETS"],
     DB: db as unknown as AppEnv["DB"],
     MAIL_FROM: "ライフプランシミュレーター <noreply@nexeed-lab.com>",
+    APP_URL: "https://lifeplan.nexeed-lab.com",
     RESEND_API_KEY: "test-unused",
     RATE_LIMIT: rateLimitKv as unknown as AppEnv["RATE_LIMIT"],
     TURNSTILE_SECRET_KEY: "test-turnstile-secret",

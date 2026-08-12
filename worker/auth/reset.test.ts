@@ -9,7 +9,12 @@ import { hashToken } from "./session";
 
 const KEY = "a".repeat(43);
 const KDF_VERSION = 1;
-const FORGOT_PASSWORD_EMAIL_DAILY_LIMIT = 5; // reset.ts のプライベート定数と同値（非公開なのでここで複製）
+
+// reset.ts のプライベート定数と同値（非公開なのでここで複製する。変えるときは
+// 両方一緒に直す）。
+const FORGOT_PASSWORD_EMAIL_DAILY_LIMIT = 5;
+const FORGOT_PASSWORD_IP_DAILY_LIMIT = 30;
+const RESET_PASSWORD_IP_DAILY_LIMIT = 60;
 
 interface FakeUserRow {
   id: string;
@@ -109,6 +114,32 @@ function resendSuccessResponse(): Response {
   });
 }
 
+/**
+ * `ExecutionContext` のスタブ。`waitUntil` に渡された Promise を溜めておき、
+ * `flush()` で明示的に待てるようにする（本物の Workers ランタイムは応答後も
+ * これらを裏で完走させるが、テストでは結果を確認したい箇所でだけ `flush` する）。
+ */
+function makeCtx() {
+  const pending: Promise<unknown>[] = [];
+  let calls = 0;
+  const ctx = {
+    waitUntil: (p: Promise<unknown>) => {
+      calls++;
+      pending.push(p);
+    },
+    passThroughOnException: () => {},
+  } as unknown as ExecutionContext;
+  return {
+    ctx,
+    get callCount() {
+      return calls;
+    },
+    flush: async () => {
+      await Promise.allSettled(pending);
+    },
+  };
+}
+
 // sendPasswordResetMail はグローバル fetch を叩く（reset.ts は fetchImpl を
 // 差し替えない）。既定では常に成功させ、失敗系だけその場で上書きする。
 beforeEach(() => {
@@ -124,6 +155,7 @@ function makeEnv(db: FakeD1, rateLimitKv: KvStore = fakeRateLimitKv()): AppEnv {
     ASSETS: { fetch: vi.fn() } as unknown as AppEnv["ASSETS"],
     DB: db as unknown as AppEnv["DB"],
     MAIL_FROM: "ライフプランシミュレーター <noreply@nexeed-lab.com>",
+    APP_URL: "https://lifeplan.nexeed-lab.com",
     RESEND_API_KEY: "test-unused",
     RATE_LIMIT: rateLimitKv as unknown as AppEnv["RATE_LIMIT"],
     TURNSTILE_SECRET_KEY: "test-unused",
@@ -133,9 +165,10 @@ function makeEnv(db: FakeD1, rateLimitKv: KvStore = fakeRateLimitKv()): AppEnv {
 function req(
   method: string,
   url: string,
-  opts: { body?: unknown; rawBody?: string } = {},
+  opts: { body?: unknown; rawBody?: string; ip?: string } = {},
 ): Request {
   const headers: Record<string, string> = {};
+  if (opts.ip) headers["cf-connecting-ip"] = opts.ip;
   if (opts.body !== undefined || opts.rawBody !== undefined) {
     headers["content-type"] = "application/json";
   }
@@ -146,9 +179,19 @@ function req(
   });
 }
 
-async function call(request: Request, db: FakeD1, rateLimitKv?: KvStore): Promise<Response> {
+/**
+ * @param ctx 省略時は使い捨ての ExecutionContext を渡す（waitUntil に載った
+ *   処理の完了は待たない）。バックグラウンド処理の結果を確認したいテストだけ、
+ *   `makeCtx()` で作った ctx を明示的に渡し、呼び出し後に `flush()` する。
+ */
+async function call(
+  request: Request,
+  db: FakeD1,
+  rateLimitKv?: KvStore,
+  ctx?: ExecutionContext,
+): Promise<Response> {
   const env = makeEnv(db, rateLimitKv);
-  const res = await handleResetRoute(request, env, new URL(request.url));
+  const res = await handleResetRoute(request, env, new URL(request.url), ctx ?? makeCtx().ctx);
   if (!res) throw new Error("handleResetRoute returned null for a known reset path");
   return res;
 }
@@ -191,25 +234,70 @@ describe("forgot-password: 応答は常に 200 { ok: true }", () => {
   });
 });
 
+describe("forgot-password: 応答時間でも登録済みかどうかを漏らさない（I-2）", () => {
+  it("メール送信の完了を待たずに応答する（fetchが解決しなくてもタイムアウトしない）", async () => {
+    const db = new FakeD1();
+    db.users.push({ id: "user-1", email: "exists@example.com", passwordHash: "irrelevant" });
+
+    // 意図的に解決しない Promise。応答がこれを待っていたら、このテスト自体が
+    // vitest のデフォルトタイムアウトで失敗する
+    vi.stubGlobal("fetch", vi.fn().mockReturnValue(new Promise<Response>(() => {})));
+
+    const ctxHelper = makeCtx();
+    const res = await call(
+      req("POST", FORGOT_URL, { body: { email: "exists@example.com" } }),
+      db,
+      undefined,
+      ctxHelper.ctx,
+    );
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true });
+  });
+
+  it("登録済みアドレスなら ctx.waitUntil に1回だけ処理を載せる", async () => {
+    const db = new FakeD1();
+    db.users.push({ id: "user-1", email: "exists@example.com", passwordHash: "irrelevant" });
+    const ctxHelper = makeCtx();
+
+    await call(req("POST", FORGOT_URL, { body: { email: "exists@example.com" } }), db, undefined, ctxHelper.ctx);
+
+    expect(ctxHelper.callCount).toBe(1);
+  });
+
+  it("未登録アドレスなら ctx.waitUntil を呼ばない", async () => {
+    const db = new FakeD1();
+    const ctxHelper = makeCtx();
+
+    await call(req("POST", FORGOT_URL, { body: { email: "nobody@example.com" } }), db, undefined, ctxHelper.ctx);
+
+    expect(ctxHelper.callCount).toBe(0);
+  });
+});
+
 describe("forgot-password: 登録済みアドレスだけトークンを発行しメールを送る", () => {
   it("未登録アドレスでは password_resets に行が増えず、メールも送られない", async () => {
     const db = new FakeD1();
     const fetchImpl = vi.fn().mockImplementation(async () => resendSuccessResponse());
     vi.stubGlobal("fetch", fetchImpl);
+    const ctxHelper = makeCtx();
 
-    await call(req("POST", FORGOT_URL, { body: { email: "nobody@example.com" } }), db);
+    await call(req("POST", FORGOT_URL, { body: { email: "nobody@example.com" } }), db, undefined, ctxHelper.ctx);
+    await ctxHelper.flush();
 
     expect(db.resets).toHaveLength(0);
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
-  it("登録済みアドレスでは password_resets に行が増え、Resend へ送信される", async () => {
+  it("登録済みアドレスでは password_resets に行が増え、Resend へ送信される（waitUntil完了後）", async () => {
     const db = new FakeD1();
     db.users.push({ id: "user-1", email: "exists@example.com", passwordHash: "irrelevant" });
     const fetchImpl = vi.fn().mockImplementation(async () => resendSuccessResponse());
     vi.stubGlobal("fetch", fetchImpl);
+    const ctxHelper = makeCtx();
 
-    await call(req("POST", FORGOT_URL, { body: { email: "exists@example.com" } }), db);
+    await call(req("POST", FORGOT_URL, { body: { email: "exists@example.com" } }), db, undefined, ctxHelper.ctx);
+    await ctxHelper.flush();
 
     expect(db.resets).toHaveLength(1);
     expect(db.resets[0]?.userId).toBe("user-1");
@@ -225,18 +313,26 @@ describe("forgot-password: 登録済みアドレスだけトークンを発行�
       "fetch",
       vi.fn().mockResolvedValue(new Response(JSON.stringify({ message: "boom" }), { status: 500 })),
     );
+    const ctxHelper = makeCtx();
 
-    const res = await call(req("POST", FORGOT_URL, { body: { email: "exists@example.com" } }), db);
+    const res = await call(
+      req("POST", FORGOT_URL, { body: { email: "exists@example.com" } }),
+      db,
+      undefined,
+      ctxHelper.ctx,
+    );
 
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ ok: true });
+
+    await ctxHelper.flush();
     // トークン自体は既に発行済み（メール送信の失敗とは独立）
     expect(db.resets).toHaveLength(1);
   });
 });
 
 describe("forgot-password: レート制限はアドレスの有無に関わらず消費する", () => {
-  it("未登録アドレスへの1回目の呼び出しでもKVの枠が消費される", async () => {
+  it("未登録アドレスへの1回目の呼び出しでもメール単位のKVの枠が消費される", async () => {
     const db = new FakeD1();
     const kv = fakeRateLimitKv();
     const email = "nobody-rl@example.com";
@@ -247,21 +343,82 @@ describe("forgot-password: レート制限はアドレスの有無に関わら�
     expect(await kv.get(key)).toBe("1");
   });
 
-  it("登録済みアドレスが上限を超えると、それ以降はトークンもメールも発行しない（応答は変えない）", async () => {
+  it("未登録IPからの1回目の呼び出しでもIP単位のKVの枠が消費される", async () => {
+    const db = new FakeD1();
+    const kv = fakeRateLimitKv();
+    const ip = "203.0.113.9";
+
+    await call(req("POST", FORGOT_URL, { body: { email: "someone@example.com" }, ip }), db, kv);
+
+    const key = `rl:forgot-password:${todayUtc()}:${await hashForKey(ip)}`;
+    expect(await kv.get(key)).toBe("1");
+  });
+
+  it("登録済みアドレスがメール単位の上限を超えると、それ以降はトークンもメールも発行しない（応答は変えない）", async () => {
     const db = new FakeD1();
     db.users.push({ id: "user-1", email: "limited@example.com", passwordHash: "irrelevant" });
     const kv = fakeRateLimitKv();
     const fetchImpl = vi.fn().mockImplementation(async () => resendSuccessResponse());
     vi.stubGlobal("fetch", fetchImpl);
+    const ctxHelper = makeCtx();
 
     for (let i = 0; i < FORGOT_PASSWORD_EMAIL_DAILY_LIMIT + 1; i++) {
-      const res = await call(req("POST", FORGOT_URL, { body: { email: "limited@example.com" } }), db, kv);
+      const res = await call(
+        req("POST", FORGOT_URL, { body: { email: "limited@example.com" } }),
+        db,
+        kv,
+        ctxHelper.ctx,
+      );
       expect(res.status).toBe(200);
       expect(await res.json()).toEqual({ ok: true });
     }
+    await ctxHelper.flush();
 
     expect(db.resets).toHaveLength(FORGOT_PASSWORD_EMAIL_DAILY_LIMIT);
     expect(fetchImpl).toHaveBeenCalledTimes(FORGOT_PASSWORD_EMAIL_DAILY_LIMIT);
+  });
+
+  it("IP単位の上限を超えると、初めて使う登録済みアドレスでもトークンを発行しない（I-3）", async () => {
+    const db = new FakeD1();
+    db.users.push({ id: "victim-1", email: "victim@example.com", passwordHash: "irrelevant" });
+    const kv = fakeRateLimitKv();
+    const ip = "203.0.113.50";
+    const ctxHelper = makeCtx();
+
+    // 別々のメールアドレスで IP の枠（30回/日）を使い切る
+    for (let i = 0; i < FORGOT_PASSWORD_IP_DAILY_LIMIT; i++) {
+      const res = await call(
+        req("POST", FORGOT_URL, { body: { email: `filler-${i}@example.com` }, ip }),
+        db,
+        kv,
+        ctxHelper.ctx,
+      );
+      expect(res.status).toBe(200);
+    }
+
+    // 31回目。victim@example.com はこのIPからは初めてのリクエストだが、
+    // IP側の上限で弾かれ、応答は変わらないままトークンも作られない
+    const res = await call(
+      req("POST", FORGOT_URL, { body: { email: "victim@example.com" }, ip }),
+      db,
+      kv,
+      ctxHelper.ctx,
+    );
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true });
+
+    await ctxHelper.flush();
+    expect(db.resets).toHaveLength(0);
+  });
+
+  it("cf-connecting-ip が無いときはIP単位の制限がかからない（ローカル開発対応）", async () => {
+    const db = new FakeD1();
+    const kv = fakeRateLimitKv();
+
+    for (let i = 0; i < FORGOT_PASSWORD_IP_DAILY_LIMIT + 5; i++) {
+      const res = await call(req("POST", FORGOT_URL, { body: { email: `no-ip-${i}@example.com` } }), db, kv);
+      expect(res.status).toBe(200);
+    }
   });
 });
 
@@ -399,6 +556,40 @@ describe("reset-password: トークンの消費と全セッション削除", () 
   });
 });
 
+describe("reset-password: IP別レート制限（60回/日、I-3）", () => {
+  it("同一IPから61回目は 429 / RATE_LIMITED になる", async () => {
+    const db = new FakeD1();
+    const kv = fakeRateLimitKv();
+    const ip = "198.51.100.77";
+    let last: Response | undefined;
+
+    for (let i = 0; i < RESET_PASSWORD_IP_DAILY_LIMIT + 1; i++) {
+      last = await call(
+        req("POST", RESET_URL, { body: { token: `t-${i}`, key: KEY, kdfVersion: KDF_VERSION }, ip }),
+        db,
+        kv,
+      );
+    }
+
+    expect(last!.status).toBe(429);
+    expect(await errorCode(last!)).toBe("RATE_LIMITED");
+  });
+
+  it("cf-connecting-ip が無いときは何回呼んでも制限がかからない（ローカル開発対応）", async () => {
+    const db = new FakeD1();
+    const kv = fakeRateLimitKv();
+
+    for (let i = 0; i < RESET_PASSWORD_IP_DAILY_LIMIT + 1; i++) {
+      const res = await call(
+        req("POST", RESET_URL, { body: { token: `t2-${i}`, key: KEY, kdfVersion: KDF_VERSION } }),
+        db,
+        kv,
+      );
+      expect(res.status).not.toBe(429);
+    }
+  });
+});
+
 describe("ディスパッチ: 未知のパス・メソッド", () => {
   it("reset関連以外のパスは null を返す", async () => {
     const db = new FakeD1();
@@ -407,6 +598,7 @@ describe("ディスパッチ: 未知のパス・メソッド", () => {
       req("GET", "https://lifeplan.example.com/api/auth/me"),
       env,
       new URL("https://lifeplan.example.com/api/auth/me"),
+      makeCtx().ctx,
     );
     expect(res).toBeNull();
   });

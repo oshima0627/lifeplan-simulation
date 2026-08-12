@@ -16,6 +16,7 @@ import { sendPasswordResetMail } from "../email";
 import type { AppEnv } from "../env";
 import { errorResponse, json } from "../http";
 import { checkAndBump, hashForKey, todayUtc } from "../rateLimit";
+import { checkIpRateLimit } from "./routes";
 import { hashClientKey, readClientKeyInput } from "./password";
 import { hashToken, newSessionToken } from "./session";
 
@@ -24,10 +25,24 @@ export const RESET_TOKEN_TTL_MINUTES = 30;
 
 // メールアドレス別・1日あたりの forgot-password 上限。
 //
-// ⚠️ IPではなくアドレス単位にする。ここでの目的は「他人のメールボックスを
-// 再設定メールで埋め尽くされない」ことであり、IP単位の枠だと同一IPから
-// 複数アドレス分の被害を防げない。
+// ⚠️ IPではなくアドレス単位。ここでの目的は「他人のメールボックスを
+// 再設定メールで埋め尽くされない」ことであり、IP単位の枠だけだと同一IPから
+// 複数アドレス分の被害を防げない（下の FORGOT_PASSWORD_IP_DAILY_LIMIT と併用する）。
 const FORGOT_PASSWORD_EMAIL_DAILY_LIMIT = 5;
+
+// IP別・1日あたりの forgot-password 上限。
+//
+// アドレス単位の枠だけでは、1つのIPが別々のアドレスへ何度でも投げられる
+// （① 登録済み／未登録の応答時間差を突いた総当たり、② 流出リストの
+// アドレスへ Resend の送信枠を枯渇させる目的の乱打、のいずれも防げない）。
+// signup（10回/日）・login（30回/日）の考え方に揃え、乱打を頭打ちにする。
+const FORGOT_PASSWORD_IP_DAILY_LIMIT = 30;
+
+// IP別・1日あたりの reset-password 上限。
+//
+// トークンは256bitの乱数なので総当たりは現実的に成立しないが、無認証で
+// D1 の UPDATE を無制限に発行できる経路をそのまま残す理由もないため、緩く絞る。
+const RESET_PASSWORD_IP_DAILY_LIMIT = 60;
 
 function invalidInput(): Response {
   return errorResponse("INVALID_INPUT", "入力が不正です", 400);
@@ -40,6 +55,19 @@ function resetTokenInvalid(): Response {
     "このリンクは無効か、有効期限が切れています。再度パスワード再設定をお試しください",
     400,
   );
+}
+
+/**
+ * レート制限に引っかかったときの応答（reset-password 用）。
+ *
+ * ⚠️ forgot-password では絶対に使わないこと。forgot-password は
+ * アドレスの有無に関わらず常に 200 { ok: true } を返す必要があり、ここで
+ * 429 を返すと「上限に達したかどうか」という新しい分岐が外から見える形で
+ * 生まれ、かえって情報が漏れる。reset-password はトークンの有効性で
+ * 既に応答が分かれる（RESET_TOKEN_INVALID）ため、この制約を持たない。
+ */
+function rateLimited(): Response {
+  return errorResponse("RATE_LIMITED", "しばらく時間をおいてから再度お試しください", 429);
 }
 
 /** リクエストボディを安全に JSON として読む。壊れた本文でも例外を投げない。 */
@@ -58,14 +86,34 @@ function resetExpiryIso(from: Date = new Date()): string {
 }
 
 /**
- * リクエストの origin をメール本文のリンク組み立てに使う `appUrl` とする。
+ * トークン発行・D1 書き込み・メール送信をまとめて行う。
  *
- * 専用の環境変数を増やさずに済ませるための選択。本番ではカスタムドメイン
- * （lifeplan.nexeed-lab.com）がそのまま origin になり、ローカル開発でも
- * localhost の origin がそのまま使えるため、環境ごとの出し分けが要らない。
+ * `handleForgotPassword` から `ctx.waitUntil()` に載せて呼ぶ前提。
+ * 応答を返した後に実行されるため、ここで投げた例外は誰も待っていない
+ * （`sendPasswordResetMail` の失敗は関数内で握りつぶし、それ以外の
+ * 予期しない例外は Workers のランタイムログに出るだけで応答には影響しない）。
  */
-function appUrlFromRequest(request: Request): string {
-  return new URL(request.url).origin;
+async function issuePasswordResetAndSendMail(env: AppEnv, userId: string, email: string): Promise<void> {
+  const token = newSessionToken();
+  await createPasswordReset(env.DB, {
+    tokenHash: await hashToken(token),
+    userId,
+    expiresAt: resetExpiryIso(),
+  });
+
+  try {
+    await sendPasswordResetMail({
+      to: email,
+      token,
+      expiresInMinutes: RESET_TOKEN_TTL_MINUTES,
+      apiKey: env.RESEND_API_KEY,
+      from: env.MAIL_FROM,
+      appUrl: env.APP_URL,
+    });
+  } catch (err) {
+    // 送信失敗の詳細（宛先を含みうる）は応答に出さず、ログにだけ残す
+    console.error(err);
+  }
 }
 
 /**
@@ -75,11 +123,19 @@ function appUrlFromRequest(request: Request): string {
  * 変えない（列挙対策）。メール送信に失敗しても応答は変えない
  * （原因は console.error にだけ残す）。
  *
- * レート制限はアドレスが未登録でも必ず消費する。「登録済みのときだけ枠を
- * 使う」形にすると、同じアドレスに何度もリクエストしたときの挙動の違い
- * （＝枠が減るかどうか）から存在の有無が漏れる。
+ * ⚠️ **応答時間でも登録済みかどうかを漏らさない。** 登録済みアドレスだけ
+ * 追加で D1 への INSERT と Resend への外部HTTP往復が発生すると、本文・
+ * ヘッダを完全に揃えても応答時間の差だけで判定できてしまう。そのため
+ * `findUserByEmail` までは待ってよいが、その先（トークン発行・DB書き込み・
+ * メール送信）は `ctx.waitUntil()` で応答の外へ逃がす。
+ *
+ * レート制限（アドレス別・IP別の両方）は、アドレスが未登録でも必ず消費する。
+ * 「登録済みのときだけ枠を使う」形にすると、同じアドレス／IPに何度も
+ * リクエストしたときの挙動の違い（＝枠が減るかどうか）から存在の有無が漏れる。
+ * `&&` の短絡評価でどちらかの消費が省略されないよう、個別に await してから
+ * 結果をまとめて見る。
  */
-async function handleForgotPassword(request: Request, env: AppEnv): Promise<Response> {
+async function handleForgotPassword(request: Request, env: AppEnv, ctx: ExecutionContext): Promise<Response> {
   const body = await readJsonBody(request);
   const email = body ? normalizeEmail(body.email) : null;
 
@@ -87,35 +143,21 @@ async function handleForgotPassword(request: Request, env: AppEnv): Promise<Resp
   // 応答を区別しない。常にここで同じ 200 を返す。
   if (!email) return json({ ok: true });
 
-  const rateLimitKey = `rl:forgot-password:${todayUtc()}:${await hashForKey(email)}`;
-  const allowed = await checkAndBump(env.RATE_LIMIT, rateLimitKey, FORGOT_PASSWORD_EMAIL_DAILY_LIMIT);
+  const ip = request.headers.get("cf-connecting-ip");
+  const ipAllowed = await checkIpRateLimit(env, ip, "forgot-password", FORGOT_PASSWORD_IP_DAILY_LIMIT);
 
-  // 上限に達していたら、トークン発行もメール送信もしない。ここで応答を
+  const emailRateLimitKey = `rl:forgot-password:${todayUtc()}:${await hashForKey(email)}`;
+  const emailAllowed = await checkAndBump(env.RATE_LIMIT, emailRateLimitKey, FORGOT_PASSWORD_EMAIL_DAILY_LIMIT);
+
+  // 上限に達していたら、トークン発行もメール送信もしない。ここでも応答を
   // 変えないのは同じ理由（枠を使い切ったかどうかが外から見えると、
-  // 「これは登録済みアドレスだ」という手がかりになりうる）。
-  if (allowed) {
+  // 「これは登録済みアドレスだ」という手がかりになりうる）。429は返さない。
+  if (ipAllowed && emailAllowed) {
     const user = await findUserByEmail(env.DB, email);
     if (user) {
-      const token = newSessionToken();
-      await createPasswordReset(env.DB, {
-        tokenHash: await hashToken(token),
-        userId: user.id,
-        expiresAt: resetExpiryIso(),
-      });
-
-      try {
-        await sendPasswordResetMail({
-          to: email,
-          token,
-          expiresInMinutes: RESET_TOKEN_TTL_MINUTES,
-          apiKey: env.RESEND_API_KEY,
-          from: env.MAIL_FROM,
-          appUrl: appUrlFromRequest(request),
-        });
-      } catch (err) {
-        // 送信失敗の詳細（宛先を含みうる）は応答に出さず、ログにだけ残す
-        console.error(err);
-      }
+      // ⚠️ await せず投げっぱなしにしない。Workers は応答を返すと同時に
+      // 実行を打ち切りうるため、必ず ctx.waitUntil() に載せて生かし続ける。
+      ctx.waitUntil(issuePasswordResetAndSendMail(env, user.id, email));
     }
   }
 
@@ -131,8 +173,17 @@ async function handleForgotPassword(request: Request, env: AppEnv): Promise<Resp
  *
  * 成功したらそのユーザーの全セッションを削除し、**自動ログインはしない**
  * （Set-Cookie を出さない）。新しいパスワードで入り直してもらう。
+ *
+ * IP別の緩いレート制限（60回/日）を先にかける。トークン自体は256bitの
+ * 乱数で総当たりは成立しないが、無認証で D1 の UPDATE を無制限に発行できる
+ * 経路を残す理由がないため。
  */
 async function handleResetPassword(request: Request, env: AppEnv): Promise<Response> {
+  const ip = request.headers.get("cf-connecting-ip");
+  if (!(await checkIpRateLimit(env, ip, "reset-password", RESET_PASSWORD_IP_DAILY_LIMIT))) {
+    return rateLimited();
+  }
+
   const body = await readJsonBody(request);
   if (!body) return invalidInput();
 
@@ -150,7 +201,7 @@ async function handleResetPassword(request: Request, env: AppEnv): Promise<Respo
   return json({ ok: true });
 }
 
-type Handler = (request: Request, env: AppEnv) => Promise<Response>;
+type Handler = (request: Request, env: AppEnv, ctx: ExecutionContext) => Promise<Response>;
 
 const ROUTES: Record<string, Handler> = {
   "POST /api/auth/forgot-password": handleForgotPassword,
@@ -163,14 +214,19 @@ const KNOWN_PATHS = new Set(Object.keys(ROUTES).map((key) => key.split(" ", 2)[1
  * `/api/auth/forgot-password`・`/api/auth/reset-password` のディスパッチ。
  * worker/auth/routes.ts の handleAuthRoute と同じ形にして、呼び出し側
  * （worker/index.ts）から並べて呼べるようにする。
+ *
+ * `ctx`（`ExecutionContext`）は forgot-password の `waitUntil` に使うため
+ * 必須の引数にしてある（reset-password 側は現状使わないが、呼び出し側の
+ * ディスパッチを1本にするため同じシグネチャに揃える）。
  */
 export async function handleResetRoute(
   request: Request,
   env: AppEnv,
   url: URL,
+  ctx: ExecutionContext,
 ): Promise<Response | null> {
   const handler = ROUTES[`${request.method} ${url.pathname}`];
-  if (handler) return handler(request, env);
+  if (handler) return handler(request, env, ctx);
   if (KNOWN_PATHS.has(url.pathname)) {
     return errorResponse("METHOD_NOT_ALLOWED", "許可されていないメソッドです", 405);
   }

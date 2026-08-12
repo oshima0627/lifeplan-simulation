@@ -26,15 +26,29 @@ function makeEnv(): AppEnv {
     ASSETS: { fetch: vi.fn() } as unknown as AppEnv["ASSETS"],
     DB: {} as never,
     MAIL_FROM: "ライフプランシミュレーター <noreply@nexeed-lab.com>",
+    APP_URL: "https://lifeplan.nexeed-lab.com",
     RESEND_API_KEY: "test-unused",
     RATE_LIMIT: {} as never,
     TURNSTILE_SECRET_KEY: "test-unused",
   };
 }
 
+/**
+ * `ExecutionContext` のスタブ。`worker.fetch` の第3引数として必須になった
+ * （`worker/auth/reset.ts` の forgot-password が `waitUntil` を使うため）。
+ * このファイルのテストはいずれも `/api/health` または静的アセット経路のみで
+ * `waitUntil` に到達しないため、呼ばれたかどうかの検証はしない。
+ */
+function makeCtx(): ExecutionContext {
+  return {
+    waitUntil: vi.fn(),
+    passThroughOnException: vi.fn(),
+  } as unknown as ExecutionContext;
+}
+
 describe("worker.fetch の例外境界", () => {
   it("ハンドラ内の例外を 500 + JSON + no-store に変換する", async () => {
-    const res = await worker.fetch(new Request("http://localhost/api/health"), makeEnv());
+    const res = await worker.fetch(new Request("http://localhost/api/health"), makeEnv(), makeCtx());
 
     expect(res.status).toBe(500);
     expect(res.headers.get("content-type")).toBe("application/json; charset=utf-8");
@@ -42,7 +56,7 @@ describe("worker.fetch の例外境界", () => {
   });
 
   it("応答本文に例外の生メッセージを含めない", async () => {
-    const res = await worker.fetch(new Request("http://localhost/api/health"), makeEnv());
+    const res = await worker.fetch(new Request("http://localhost/api/health"), makeEnv(), makeCtx());
 
     const bodyText = await res.text();
     expect(bodyText).not.toContain("boom");
@@ -54,7 +68,7 @@ describe("worker.fetch の例外境界", () => {
 
   it("env.ASSETS.fetch は try の外なので、この例外境界の影響を受けない", async () => {
     const env = makeEnv();
-    await worker.fetch(new Request("http://localhost/"), env);
+    await worker.fetch(new Request("http://localhost/"), env, makeCtx());
     expect(env.ASSETS.fetch).toHaveBeenCalledTimes(1);
   });
 });

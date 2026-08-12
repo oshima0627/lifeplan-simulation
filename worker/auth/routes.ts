@@ -78,7 +78,7 @@ function rateLimited(): Response {
  * 取れないのは `wrangler dev` などのローカル開発時だけ。ここで一律に
  * 弾いてしまうとローカル開発そのものができなくなるため、意図的に許可側へ倒す。
  */
-async function checkIpRateLimit(
+export async function checkIpRateLimit(
   env: AppEnv,
   ip: string | null,
   scope: string,
