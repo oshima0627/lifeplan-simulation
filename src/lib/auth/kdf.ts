@@ -15,10 +15,18 @@
 //       （長さのチェックはブラウザ側の助言に留まる。docs/03）。
 
 import { normalizeEmail } from "../../../shared/auth/email";
+import {
+  fromBase64Url,
+  isKnownKdfVersion,
+  isValidClientKey,
+  KDF_VERSION,
+  toBase64Url,
+} from "../../../shared/auth/kdf-format";
 
-// 導出パラメータの版。DB には版つきで保存するので、将来上げても
-// 既存ユーザーを壊さずに移行できる（移行手順は docs/03）。
-export const KDF_VERSION = 1;
+// 鍵の形式判定（版番号・base64url の長さ）は shared/auth/kdf-format.ts に
+// 集約している。worker/auth/password.ts と同じ実体を import することで、
+// 「片方だけ更新して版がズレる」事故を型レベルで防ぐ。
+export { KDF_VERSION, isKnownKdfVersion, isValidClientKey, toBase64Url, fromBase64Url };
 
 const KDF_PARAMS: Record<number, { iterations: number }> = {
   // 端末側で約0.2〜0.6秒。ログインは頻繁ではないので許容できる
@@ -26,23 +34,10 @@ const KDF_PARAMS: Record<number, { iterations: number }> = {
 };
 
 const KEY_BITS = 256;
-const KEY_BASE64URL_LENGTH = 43; // 32バイトを base64url にした長さ
 
 // パスワードの長さ。サーバーでは検証できないので、ここは利用者への助言。
 export const PASSWORD_MIN_LENGTH = 8;
 export const PASSWORD_MAX_LENGTH = 200;
-
-export function toBase64Url(bytes: Uint8Array): string {
-  let s = "";
-  for (const b of bytes) s += String.fromCharCode(b);
-  return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-}
-
-export function fromBase64Url(value: string): Uint8Array {
-  const b64 = value.replace(/-/g, "+").replace(/_/g, "/");
-  const padded = b64 + "=".repeat((4 - (b64.length % 4)) % 4);
-  return Uint8Array.from(atob(padded), (c) => c.charCodeAt(0));
-}
 
 // ソルトはメールから決定的に作る。サーバーに問い合わせずに導出できるので、
 // 「このアドレスは登録済みか」を答える窓口を作らずに済む（存在の洗い出し対策）。
@@ -82,17 +77,4 @@ export async function deriveClientKey(
     KEY_BITS,
   );
   return toBase64Url(new Uint8Array(bits));
-}
-
-// サーバーが受け取った値の形だけを検査する（中身は検証しようがない）。
-export function isValidClientKey(raw: unknown): raw is string {
-  return (
-    typeof raw === "string" &&
-    raw.length === KEY_BASE64URL_LENGTH &&
-    /^[A-Za-z0-9_-]+$/.test(raw)
-  );
-}
-
-export function isKnownKdfVersion(raw: unknown): raw is number {
-  return typeof raw === "number" && KDF_PARAMS[raw] !== undefined;
 }

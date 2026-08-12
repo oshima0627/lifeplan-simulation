@@ -6,30 +6,15 @@
 //
 // CPU コストはマイクロ秒オーダーなので、Workers 無料プランの 10ms に収まる。
 //
-// ⚠️ `worker/` から `src/` を import しない（worker/tsconfig.json の
-// "paths": {} で封じてある）。そのため `src/lib/auth/kdf.ts` にある
-// base64url 変換・入力検証と同等の実装をここに複製している
-// （判定は「43文字の base64url」「既知の版番号」の2つだけなので重複の害は小さい）。
+// 鍵の形式判定（base64url 変換・43文字の長さ・既知の版番号）は
+// shared/auth/kdf-format.ts に集約し、src/lib/auth/kdf.ts と共有している。
+// `worker/` から `src/` は import しない（worker/tsconfig.json の
+// "paths": {} で封じてある）が、`shared/` はどちらからも import できる。
+
+import { fromBase64Url, isKnownKdfVersion, isValidClientKey, toBase64Url } from "../../shared/auth/kdf-format";
 
 const SALT_BYTES = 16;
 const SCHEME = "pbkdf2c"; // client-side PBKDF2 + server-side digest
-
-// src/lib/auth/kdf.ts の isValidClientKey / isKnownKdfVersion と同じ値。
-// ズレるとブラウザ側で正しく作られた鍵をサーバーが拒否してしまう。
-const KEY_BASE64URL_LENGTH = 43; // 32バイトを base64url にした長さ
-const KNOWN_KDF_VERSIONS = new Set([1]);
-
-function toBase64Url(bytes: Uint8Array): string {
-  let s = "";
-  for (const b of bytes) s += String.fromCharCode(b);
-  return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-}
-
-function fromBase64Url(value: string): Uint8Array {
-  const b64 = value.replace(/-/g, "+").replace(/_/g, "/");
-  const padded = b64 + "=".repeat((4 - (b64.length % 4)) % 4);
-  return Uint8Array.from(atob(padded), (c) => c.charCodeAt(0));
-}
 
 // 保存形式: pbkdf2c-v<kdfVersion>$<serverSalt_b64url>$<digest_b64url>
 // kdfVersion を含めるのは、後でブラウザ側の反復回数を上げたときに
@@ -124,18 +109,6 @@ export async function verifyClientKey(
 // 「再ログイン時に新版へ入れ替える」導線に使う。
 export function storedKdfVersion(stored: string): number | null {
   return decode(stored)?.version ?? null;
-}
-
-function isValidClientKey(raw: unknown): raw is string {
-  return (
-    typeof raw === "string" &&
-    raw.length === KEY_BASE64URL_LENGTH &&
-    /^[A-Za-z0-9_-]+$/.test(raw)
-  );
-}
-
-function isKnownKdfVersion(raw: unknown): raw is number {
-  return typeof raw === "number" && KNOWN_KDF_VERSIONS.has(raw);
 }
 
 // リクエストボディの検証。パスワード本体は届かないので、形だけを見る。

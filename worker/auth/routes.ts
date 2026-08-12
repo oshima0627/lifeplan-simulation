@@ -55,20 +55,30 @@ async function readJsonBody(request: Request): Promise<Record<string, unknown> |
   }
 }
 
-/** `Secure` は https のときだけ付ける。ローカル開発（http）で Cookie が落ちるのを防ぐ */
-function isSecureRequest(request: Request): boolean {
-  return new URL(request.url).protocol === "https:";
+/**
+ * `Secure` 属性を付けるか。
+ *
+ * ⚠️ リクエストのスキームで判定してはいけない。Workers には http:// の
+ * リクエストもそのまま届くため（Cloudflare 側で Always Use HTTPS を有効に
+ * しない限り）、http で着地したままログインすると Secure 無しの Cookie が
+ * 発行され、以降トークンが平文で流れる。
+ *
+ * ローカル開発（http://localhost 等）でだけ外し、それ以外は常に付ける。
+ */
+function shouldSecureCookie(request: Request): boolean {
+  const host = new URL(request.url).hostname;
+  return host !== "localhost" && host !== "127.0.0.1" && host !== "[::1]";
 }
 
 function sessionCookieHeader(request: Request, token: string): Record<string, string> {
   const maxAgeSeconds = SESSION_TTL_DAYS * 24 * 60 * 60;
   return {
-    "set-cookie": buildSetCookie(SESSION_COOKIE, token, maxAgeSeconds, isSecureRequest(request)),
+    "set-cookie": buildSetCookie(SESSION_COOKIE, token, maxAgeSeconds, shouldSecureCookie(request)),
   };
 }
 
 function clearedSessionCookieHeader(request: Request): Record<string, string> {
-  return { "set-cookie": buildSetCookie(SESSION_COOKIE, "", 0, isSecureRequest(request)) };
+  return { "set-cookie": buildSetCookie(SESSION_COOKIE, "", 0, shouldSecureCookie(request)) };
 }
 
 /** セッションを新規に張り、生トークンを返す（D1にはハッシュだけを保存する）。 */
@@ -143,6 +153,11 @@ async function handleMe(request: Request, env: AppEnv): Promise<Response> {
   if (!token) return json({ userId: null });
 
   const userId = await findUserIdBySession(env.DB, await hashToken(token));
+  if (userId === null) {
+    // トークンはあったが無効（期限切れ／存在しない）。無効なトークンを
+    // ブラウザに残し続けない。logout と同じ仕組みで Cookie を落とす（M-4）
+    return json({ userId: null }, 200, clearedSessionCookieHeader(request));
+  }
   return json({ userId });
 }
 
