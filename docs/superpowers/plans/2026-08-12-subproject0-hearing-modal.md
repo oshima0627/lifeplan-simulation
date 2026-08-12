@@ -548,7 +548,7 @@ import { SelectField } from "./SelectField";
 
 - [ ] **Step 4: 既存テストの `toHaveValue` を文字列に直す**
 
-⚠️ **これをやらないと `Simulator.test.tsx` が6か所で落ちる。**
+⚠️ **これをやらないと `Simulator.test.tsx` が5か所で落ちる。**
 
 `<input type="number">` に対する `toHaveValue` は**数値**を返すが、
 `<select>` に対しては**文字列**を返す（jest-dom の仕様）。
@@ -563,7 +563,7 @@ import { SelectField } from "./SelectField";
 | `expect(input).toHaveValue(50)` | `expect(input).toHaveValue("50")` |
 | `expect(input).toHaveValue(60)` | `expect(input).toHaveValue("60")` |
 
-（`toHaveValue(DEFAULT_SHEET.currentAge)` は2か所、他は各1か所。**計6か所。**
+（`toHaveValue(DEFAULT_SHEET.currentAge)` は2か所、他は各1か所。**計5か所。**
 `grep -n "toHaveValue" src/components/Simulator.test.tsx` で漏れが無いか確認すること）
 
 - [ ] **Step 5: 死んだ `NumberField` を削除する**
@@ -1374,7 +1374,7 @@ recharts の軸設定が本番で初めて壊れていた事例がある（`doma
 
 | 影響 | 発生するタスク | 対処 |
 |---|---|---|
-| `toHaveValue(<数値>)` が6か所で失敗（select の値は文字列） | Task 3 | Task 3 Step 4 |
+| `toHaveValue(<数値>)` が5か所で失敗（select の値は文字列） | Task 3 | Task 3 Step 4 |
 | ラベルが二重になり `findByLabelText` が例外（既存2件） | Task 5 | Task 5 冒頭の注記 |
 
 **4. 型の整合**
