@@ -456,3 +456,37 @@ node scripts/setup-stripe.mjs
 - Webhook が**既に登録済み**の場合、署名シークレットは Stripe API から取り出せない
   （作成時にしか返らない）。勝手に消して作り直すと本番の課金が一時的に壊れるため、
   スクリプトは案内だけして手を出さない
+
+### Stripe MCP で作ったもの（2026-08-13・テストモード）
+
+接続先: `Nexeed Lab`（`acct_1TRR0pKTnrLfYvHy`）の**テストモード**。
+
+| 種別 | ID |
+| --- | --- |
+| 商品 | `prod_V3s2k0nfIEpdaF` |
+| 価格 | `price_1U3kIiKTnrLfYvHymjDohcMn`（1,980円 / 月・JPY・`tax_behavior: inclusive`） |
+
+`tax_behavior` を `inclusive` にしたのは、画面に「月額 1,980円（税込）」と出しているため。
+**一度設定すると変更できない。**
+
+**⚠️ Price はモードごとに別物。** `wrangler.jsonc` に入っているのはテストの ID なので、
+本番受付を始めるときは live の ID に差し替えて再デプロイする。
+
+#### MCP で**やらなかった**こと
+
+- **Webhook エンドポイント** — 作成レスポンスに署名シークレットが含まれ、会話の記録に残る。
+  漏れると偽のイベントで「契約中」を偽造できるため、`scripts/setup-stripe.mjs` から作る
+  （シークレットは画面に出さず `wrangler secret put` の標準入力へ直接流す）
+- **カスタマーポータルの設定** — この MCP は `GET /v1/billing_portal/configurations` しか
+  公開しておらず、作成できなかった。スクリプト側に実装した
+
+  解約は **`at_period_end`**。`immediately` にすると、その月の料金を払っているのに
+  即座に使えなくなるうえ、`worker/billing/entitlement.ts` の判定
+  （`canceled` は権利なし / `active` + `cancel_at_period_end` は権利あり）とも食い違う。
+
+#### 本番モードへ移す前に必要なもの
+
+**利用規約（サブプロジェクト D）。** Stripe は本番モードのポータル有効化で
+プライバシーポリシーと利用規約の両方の URL を求める。現在スクリプトは
+プライバシーポリシーしか渡していないので、D が終わったら
+`scripts/setup-stripe.mjs` の `business_profile` に `terms_of_service_url` を足す。
