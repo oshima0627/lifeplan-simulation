@@ -365,3 +365,68 @@ npx wrangler secret put STRIPE_WEBHOOK_SECRET
 サブスクは**特定商取引法の表示項目が買い切りと違う**。
 「自動更新であること」「解約方法と期限」「解約後いつまで使えるか」を明記する。
 `docs/superpowers/specs/` の D で扱う。
+
+---
+
+## 実装後の記録（2026-08-13）
+
+**Task 1〜7 は実装・テスト・本番デプロイまで完了。** 495テスト。
+本番 D1 にも `0002_billing.sql` を適用済み（7テーブル）。
+デプロイ Version `a9de7582-95d9-480d-a9df-d7396f2f54b8`。
+
+### 計画から変えたところ
+
+**`subscription.current_period_end` は存在しない。** Stripe の API 2025-03-31 以降、
+期間は subscription **item** 側にある（SDK 22 / `2026-07-29.dahlia` の
+`SubscriptionItems.d.ts:54` で確認）。計画のまま書いていたら型検査を通ったまま
+常に undefined になり、期末が永久に null になっていた。
+`subscription.items.data[].current_period_end` の最小値を採る。
+
+**署名検証に `Buffer` は要らない。** SDK の `WebhookPayload = string | Uint8Array` なので
+`new Uint8Array(await request.arrayBuffer())` を直接渡せる（pre-meet より1段簡単）。
+
+### 本番で確認した挙動
+
+| 対象 | 期待 | 実測 |
+| --- | --- | --- |
+| `GET /api/billing/status`（未認証） | 401 | 一致 |
+| `POST /api/billing/checkout`（未認証） | 401 | 一致 |
+| `POST /api/billing/status` | 405 | 一致 |
+| `GET /api/stripe/webhook` | 405 | 一致 |
+| `POST /api/stripe/webhook`（署名なし） | 400 | 一致 |
+
+⚠️ 偽の署名を送っても `SIGNATURE_INVALID` ではなく `SIGNATURE_MISSING` が返る。
+これは `STRIPE_WEBHOOK_SECRET` が未投入のため。**鍵が無い間は必ず弾く**（fail-closed）
+という意図どおりの挙動で、鍵を入れれば `SIGNATURE_INVALID` に変わる。
+
+### 実物で検証した SQL の意味論
+
+ローカル D1（実 SQLite）で9項目を確認済み。特に:
+
+- 古いイベント（created=100）が後着 → `changes=0`、status は `active` のまま
+- 同一秒（`>=`）は通る
+- 上限3で4回目の加算 → `changes=0`、最終値は 3
+
+### テストの落とし穴
+
+**`vi.fn()` の実装が投げた例外は、呼び出し側が正しく捕捉していても
+vitest が未処理エラーとして拾いテストを落とす。** 同期 throw でも
+`Promise.reject` + 空 `catch` でも回避できなかった。
+**モックを包む素の関数側で投げる**と解消する（`webhook.test.ts` の
+`signatureVerificationFails`）。切り分けには「戻り値を直接 console.log する」のが速い
+（今回は status=400 が返っていることが分かった時点で、製品コードは無罪と確定した）。
+
+### 残り（利用者本人の作業。私は Stripe の鍵に触れない）
+
+Task 8 がそのまま残っている。**この4つが済むまで課金は動かない。**
+
+1. Stripe で商品「AIアドバイス」/ 定期・月額 1,980円 / JPY を作る
+2. その Price ID を `wrangler.jsonc` の `vars.STRIPE_PRICE_ID` に入れて再デプロイ
+3. Webhook エンドポイント `https://lifeplan.nexeed-lab.com/api/stripe/webhook` を登録し、
+   `checkout.session.completed` と `customer.subscription.created/updated/deleted` を選ぶ
+4. `npx wrangler secret put STRIPE_SECRET_KEY` と
+   `npx wrangler secret put STRIPE_WEBHOOK_SECRET` を実行
+5. Stripe ダッシュボードで Customer Portal を有効化（解約導線がこれに依存する）
+
+⚠️ `src/components/billing/PlanCard.tsx` の `MONTHLY_PRICE_JPY` は**表示専用**。
+Stripe の Price を変えたら必ずここも直す。食い違うと表示と請求が違う状態になる。
