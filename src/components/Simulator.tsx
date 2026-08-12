@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { REAL_SCENARIOS } from "@/constants/lifeplan";
 import { runAllScenarios } from "@/lib/lifeplan/scenarios";
+import { toRealTerms } from "@/lib/lifeplan/realTerms";
 import type { HearingSheet } from "@/lib/lifeplan/types";
 import { DEFAULT_SHEET, loadSheet, saveSheet } from "@/lib/storage";
 import { CashflowChart } from "./CashflowChart";
@@ -54,8 +56,23 @@ export function Simulator() {
     saveSheet(sheet);
   }, [sheet]);
 
-  // 入力が変わったときだけ再計算する
-  const result = useMemo(() => runAllScenarios(sheet), [sheet]);
+  // 入力が変わったときだけ再計算する。
+  // エンジンは名目で計算し、ここで「今日の購買力」に直してから表示に渡す
+  // （docs/superpowers/specs/2026-08-12-paid-ai-advisor-design.md §4.6.2）。
+  // シナリオごとにインフレ率が違うため、名目のままでは3つの数字が
+  // それぞれ違う購買力の「円」になり、並べて比較できない
+  const result = useMemo(() => {
+    const nominal = runAllScenarios(sheet);
+    return {
+      ...nominal,
+      scenarios: nominal.scenarios.map((s) => {
+        const assumption = REAL_SCENARIOS.find((r) => r.key === s.key);
+        // 見つからないことは無いが、見つからなければ変換せずそのまま返す
+        // （名目のまま表示される方が、0で割って壊れるより安全）
+        return assumption ? toRealTerms(s, assumption.inflationPct) : s;
+      }),
+    };
+  }, [sheet]);
 
   return (
     <>
@@ -106,8 +123,10 @@ export function Simulator() {
           <DepletionVerdict result={result} sheet={sheet} />
           <CashflowChart result={result} />
           <p className="text-xs text-slate-500">
-            楽観＝利回り5%・昇給2%・インフレ1% ／ 普通＝3.5%・1%・2% ／
-            悲観＝2%・0%・3%。95歳までを試算しています。
+            <strong>金額はすべて今日の購買力に換算しています。</strong>
+            将来の物価上昇分を差し引いた「実質」の値です。
+            楽観＝実質利回り5%・実質昇給+1% ／ 普通＝3%・0% ／ 悲観＝1%・-1%。
+            95歳までを試算しています。
             この結果は特定の金融商品を推奨するものではありません。
           </p>
         </div>

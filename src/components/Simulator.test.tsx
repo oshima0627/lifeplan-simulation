@@ -132,3 +132,40 @@ describe("初回訪問のモーダル", () => {
     expect(loadSheet()).not.toBeNull();
   });
 });
+
+describe("実質表示", () => {
+  it("前提の説明に「今日の購買力」と実質の率が出る", async () => {
+    localStorage.setItem(
+      "lifeplan.sheet.v2",
+      JSON.stringify({
+        currentAge: 40,
+        occupation: "employee",
+        householdNetIncome: 6_000_000,
+        annualLivingCost: 3_600_000,
+        savings: 3_000_000,
+        investments: 3_000_000,
+        retirementAge: 65,
+      }),
+    );
+    render(<Simulator />);
+    expect(await screen.findByText(/今日の購買力に換算/)).toBeInTheDocument();
+    expect(screen.getByText(/実質利回り5%/)).toBeInTheDocument();
+  });
+
+  it("95歳時点の額に「今日のお金で」が添えられる", async () => {
+    localStorage.setItem(
+      "lifeplan.sheet.v2",
+      JSON.stringify({
+        currentAge: 40,
+        occupation: "employee",
+        householdNetIncome: 6_000_000,
+        annualLivingCost: 3_600_000,
+        savings: 3_000_000,
+        investments: 3_000_000,
+        retirementAge: 65,
+      }),
+    );
+    render(<Simulator />);
+    expect((await screen.findAllByText("（今日のお金で）")).length).toBe(3);
+  });
+});

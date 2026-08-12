@@ -54,7 +54,7 @@ export function CashflowChart({ result }: { result: LifeplanResult }) {
   );
   const yMax = maxTotal > 0 ? maxTotal : 1_000_000;
 
-  const ariaLabel = `資産推移グラフ。${result.scenarios
+  const ariaLabel = `資産推移グラフ。金額は今日の購買力に換算した実質値。${result.scenarios
     .map((s) => `${s.label}シナリオは${describeDepletion(s)}`)
     .join("、")}。`;
 
