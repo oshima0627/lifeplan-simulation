@@ -336,6 +336,37 @@ pre-meet と同じ。**パスワード本体をサーバーに送らない。**
 D1 に入るのは**認証・課金・利用回数だけ**で、家計情報は入らない。
 これによりプライバシー表示の変更を最小に抑えられる（§8.3）。
 
+### 5.3.1 Cloudflare 公式のベストプラクティスからの適用（2026-08-12）
+
+`wrangler` が導入した `workers-best-practices` スキルを読み、以下を A-2 以降に適用する。
+**うち2件は A-1 で作った土台への修正を含む。**
+
+| 項目 | 対応 |
+|---|---|
+| **`Env` を手書きしない** | A-1 では `worker/env.ts` を手書きした。**`wrangler types` で生成する形に切り替える**。手書きは実際の `wrangler.jsonc` のバインディングと乖離する |
+| **`crypto.subtle.timingSafeEqual` を使う** | pre-meet は定数時間比較を手書きしている。**Workers には組み込みがある**（`@cloudflare/workers-types` に存在を確認済み）。⚠️ 長さが違うと例外を投げるので、**先に長さを比較**してから呼ぶ |
+| **`observability` を有効にする** | 有料サービスになるため、ログとトレースは必須。`head_sampling_rate` つきで `wrangler.jsonc` に設定する |
+| 秘密値の直接比較を避ける | 上記 `timingSafeEqual` で担保 |
+| `Math.random()` を使わない | トークン生成は `crypto.getRandomValues()` |
+| 浮いた Promise を作らない | すべて `await` / `return` / `void` / `ctx.waitUntil()` |
+| `ctx` を分割代入しない | `this` が外れて実行時エラーになる |
+| `as unknown as T` の二重キャスト | A-1 のレビューで既に排除済み |
+
+### 5.3.2 メール送信の設定（2026-08-12 決定）
+
+| 項目 | 値 |
+|---|---|
+| 送信基盤 | **Resend**（REST を直接叩く。SDK を足さない） |
+| `RESEND_API_KEY` | ✅ `wrangler secret put` で投入済み（`secret_text`） |
+| `MAIL_FROM` | **`ライフプランシミュレーター <noreply@nexeed-lab.com>`** |
+
+`MAIL_FROM` は公開値なので `wrangler.jsonc` の `vars` に平文で置く（シークレットにしない）。
+`RESEND_API_KEY` は**絶対に `vars` に置かない**。
+
+⚠️ A-3 の着手時に **Cloudflare Email Service**（Worker バインディングで送れる）と比較する。
+外部APIキーが不要になるなら乗り換える価値があるが、Resend は pre-meet で実績があるため、
+**明確な利点が無ければ乗り換えない。**
+
 ### 5.4 不正登録対策
 
 - 登録フォームに **Turnstile**（サイトキー `0x4AAAAAAENnTBKLgFfFwJKa`）
