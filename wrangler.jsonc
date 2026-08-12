@@ -3,10 +3,19 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "lifeplan-simulator",
+  "main": "worker/index.ts",
   "compatibility_date": "2026-07-01",
+  // stripe SDK（サブプロジェクトB）で必要になる。先に入れておく
+  "compatibility_flags": ["nodejs_compat"],
   "assets": {
     "directory": "./out",
-    "not_found_handling": "404-page"
+    // Worker から静的アセットを返すために必要
+    "binding": "ASSETS",
+    "not_found_handling": "404-page",
+    // ⚠️ これが無いと /api/* へのナビゲーションリクエストが 404.html になる。
+    // true にすると静的アセットの配信まで Worker の実行回数に計上されるため、
+    // 配列で /api/* だけに絞る
+    "run_worker_first": ["/api/*"]
   },
   "d1_databases": [
     {
