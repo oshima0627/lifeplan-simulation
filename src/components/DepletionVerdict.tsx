@@ -88,7 +88,7 @@ export function DepletionVerdict({
               意味のない桁の名目額を大きく出すと、かえって信頼性を削る
               （docs/superpowers/specs/2026-08-12-paid-ai-advisor-design.md §4.6.4）
             */}
-            <div className="mt-1 text-xs text-slate-400">
+            <div className="mt-1 text-xs text-slate-500">
               95歳時点 {formatCompactYen(s.finalTotal)}
               <span className="ml-1">（今日のお金で）</span>
             </div>

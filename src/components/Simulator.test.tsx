@@ -6,7 +6,7 @@
 // （§Simulator.tsx参照）、コードを読むだけでは正しさを確認しきれない部分
 
 import "@testing-library/jest-dom/vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { HearingSheet } from "@/lib/lifeplan/types";
 import { DEFAULT_SHEET, loadSheet, saveSheet } from "@/lib/storage";
@@ -167,5 +167,71 @@ describe("実質表示", () => {
     );
     render(<Simulator />);
     expect((await screen.findAllByText("（今日のお金で）")).length).toBe(3);
+  });
+
+  // 以下2件は最終レビュー I-1 の指摘への対応。
+  // 上の2件は「今日の購買力に換算」等の静的な文言の有無しか見ておらず、
+  // Simulator.tsx の useMemo を変換前（runAllScenarios の結果をそのまま使う）に
+  // 戻しても落ちない。ここでは DepletionVerdict に表示される実際の金額を、
+  // 実際に runAllScenarios + toRealTerms を実行して得た値と突き合わせる。
+  //
+  // シート: 29歳・世帯手取り年収1,000万円・年間生活費360万円・貯金300万円・
+  // 投資300万円・リタイア65歳（年金・退職金・子供は無し＝0扱い）。
+  // 期待値は暗算ではなく、このシートに対して実際に
+  // runAllScenarios(sheet) → toRealTerms(scenario, inflationPct) → formatCompactYen
+  // を実行して得られた値（普通: 名目31.7億円/実質8.6億円、
+  // 悲観: 名目11.7億円/実質1.7億円）。
+  it("普通シナリオの95歳時点の額が実質値（8.6億円）で表示される。名目の31.7億円のままではない", async () => {
+    localStorage.setItem(
+      "lifeplan.sheet.v2",
+      JSON.stringify({
+        currentAge: 29,
+        occupation: "employee",
+        householdNetIncome: 10_000_000,
+        annualLivingCost: 3_600_000,
+        savings: 3_000_000,
+        investments: 3_000_000,
+        retirementAge: 65,
+      }),
+    );
+    render(<Simulator />);
+
+    const label = await screen.findByText("普通");
+    const card = label.closest("div.rounded") as HTMLElement;
+    expect(card).not.toBeNull();
+
+    // 実質値（正しい変換）が表示されていること
+    expect(within(card).getByText(/8\.6億円/)).toBeInTheDocument();
+    // 名目値（変換されていない値）は表示されていないこと。
+    // useMemo を変換前に戻すとここが 31.7億円 になり、このアサーションが落ちる
+    expect(within(card).queryByText(/31\.7億円/)).not.toBeInTheDocument();
+  });
+
+  it("悲観シナリオの95歳時点の額が正しいインフレ率3%で実質換算される（1.7億円）。インフレ率取り違えの1%（6.1億円）・2%（3.2億円）にはならない", async () => {
+    localStorage.setItem(
+      "lifeplan.sheet.v2",
+      JSON.stringify({
+        currentAge: 29,
+        occupation: "employee",
+        householdNetIncome: 10_000_000,
+        annualLivingCost: 3_600_000,
+        savings: 3_000_000,
+        investments: 3_000_000,
+        retirementAge: 65,
+      }),
+    );
+    render(<Simulator />);
+
+    const label = await screen.findByText("悲観");
+    const card = label.closest("div.rounded") as HTMLElement;
+    expect(card).not.toBeNull();
+
+    // 正しいインフレ率（3%）で割った実質値
+    expect(within(card).getByText(/1\.7億円/)).toBeInTheDocument();
+    // インフレ率を1%や2%と取り違えた場合の値（他シナリオの率との混同）ではないこと
+    expect(within(card).queryByText(/6\.1億円/)).not.toBeInTheDocument();
+    expect(within(card).queryByText(/3\.2億円/)).not.toBeInTheDocument();
+    // 名目値でもないこと
+    expect(within(card).queryByText(/11\.7億円/)).not.toBeInTheDocument();
   });
 });
