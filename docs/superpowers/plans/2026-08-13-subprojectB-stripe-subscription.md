@@ -490,3 +490,39 @@ node scripts/setup-stripe.mjs
 プライバシーポリシーと利用規約の両方の URL を求める。現在スクリプトは
 プライバシーポリシーしか渡していないので、D が終わったら
 `scripts/setup-stripe.mjs` の `business_profile` に `terms_of_service_url` を足す。
+
+### Webhook も MCP で作成した（テストモード）
+
+| 項目 | 値 |
+| --- | --- |
+| ID | `we_1U3kQ9KTnrLfYvHyAesKSewb` |
+| URL | `https://lifeplan.nexeed-lab.com/api/stripe/webhook` |
+| API 版 | `2026-06-24.dahlia`（**明示的に固定**） |
+| イベント | `checkout.session.completed` / `customer.subscription.created` `.updated` `.deleted` |
+
+**⚠️ API 版をアカウント既定に任せない。** `current_period_end` が subscription 直下から
+item 側へ移ったのは `2025-03-31.basil`。既定がそれより古いと、コードが期末を拾えず
+永久に null になる。同じアカウントに同居する pre-meet の Webhook は `2026-04-22.dahlia`
+に固定されており、既定値が何かは当てにできない。
+
+`STRIPE_WEBHOOK_SECRET` は投入済み。**本番の応答が `SIGNATURE_MISSING` から
+`SIGNATURE_INVALID` に変わったことで、Worker 内で SubtleCrypto 版の署名検証が
+実際に走っていることまで確認できた**（`createFetchHttpClient` /
+`createSubtleCryptoProvider` の経路が Workers で動くことの実地証明）。
+
+**⚠️ このテストモードの署名シークレットは会話の記録に残っている。**
+本番モードでは Webhook を新規作成するので自動的に別物になるが、
+テストモードのまま長く運用するなら作り直すこと。
+
+### この Stripe アカウントは lifeplan 専用ではない
+
+`acct_1TRR0pKTnrLfYvHy` には姉妹プロジェクト **pre-meet** の Webhook が同居している。
+商品・価格・Webhook を一覧して「1つしかないはず」と決めつけないこと。
+metadata（`app=lifeplan`）で絞る。
+
+### MCP で作れなかったもの
+
+**カスタマーポータルの設定だけ。** この MCP は
+`GET /v1/billing_portal/configurations` しか公開しておらず、
+`PostBillingPortalConfigurations` は "not available" を返す。
+`scripts/setup-stripe.mjs` から作る（`STRIPE_SECRET_KEY` が要る）。
