@@ -1,26 +1,24 @@
-// KVによる日次レート制限。
-//
-// 移植元: projects/pre-meet/apps/worker/src/guard.ts。考え方だけを借りる
-// （あちらは匿名/ログイン済み/IPの3層＋サーキットブレーカーだが、本プロジェクトは
-// キーと上限を受け取るだけの `checkAndBump` 1つで足りる）。
-//
-// ⚠️ KV には原子的インクリメントが無い。`get` → `put` の2ステップで近似するため、
-// 同時にリクエストが来ると読み取りが競合し、カウントが1回分落ちることがある
-// （加算が失われる、いわゆる lost update）。ここでは許容する。レート制限は
-// 「おおよそ」で機能すれば十分で、厳密な上限管理が必要なのは回数ではなく金額
-// （課金・クレジット消費）の方だから。金額を扱う処理でこの近似を使い回さないこと。
+import type { RateLimiter } from "./rateLimitDo";
 
-// Cloudflare Workers KV バインディング相当の最小インターフェース。
-// テストでは Map ベースの偽実装に差し替える。
-export interface KvStore {
-  get(key: string): Promise<string | null>;
-  put(key: string, value: string, opts?: { expirationTtl?: number }): Promise<void>;
-}
+// Durable Objects による日次レート制限。
+//
+// 元は KV（`get` → `put` の2ステップで近似、競合すると加算が1回分落ちる
+// lost update を許容する設計）だったが、Workers Free の KV 書き込み上限
+// （1,000 writes/日）だと 1IP あたり約160書き込みで枠が尽き `/api/auth/*`
+// が丸ごと 500 になるため、Durable Objects（`worker/rateLimitDo.ts` の
+// `RateLimiter`）へ移した。DO は同一インスタンスへのリクエストが直列化
+// されるため read→write の間に割り込まれず、lost update も起こらない。
+// 書き込み上限も 100,000 rows/日と KV の100倍あるため、無料枠のままで足りる。
+//
+// 判定ロジック（境界・非加算・壊れた値の扱い）は KV版と完全に一致するよう
+// `RateLimiter.checkAndBump` 側で作られている（レビュー済み）。
 
-// checkAndBump のデフォルトTTL。日次カウンタなので24時間で十分だが、
-// 呼び出し時刻とUTC日境界のずれで直前のカウンタが早く消えて上限をすり抜けない
-// よう、少し余裕を持たせる。
-const DEFAULT_TTL_SECONDS = 26 * 60 * 60;
+// checkAndBump のデフォルトTTL。DO版では `RateLimiter.checkAndBump` が
+// date列だけで日次リセットを判断し、このTTLは内部では使わない
+// （行ごとの掃除は `RateLimiter.alarm` が最終利用から48時間で行う）。
+// それでも呼び出し側のシグネチャ・デフォルト値をKV版から変えずに保つため、
+// パラメータとしては残す。
+const RATE_LIMIT_TTL_SECONDS = 26 * 60 * 60;
 
 // IPやメールアドレスなど生の値をKVキーに使わないためのハッシュ化。
 // KVのキーは運用画面（Cloudflareダッシュボード）から見えうるため、
@@ -44,24 +42,18 @@ export function todayUtc(now: Date = new Date()): string {
   return `${y}${m}${d}`;
 }
 
-function parseCount(raw: string | null): number {
-  const n = raw ? Number(raw) : 0;
-  return Number.isFinite(n) && n >= 0 ? n : 0;
-}
-
 // 上限未満なら許可してカウンタを+1、上限に達していたら拒否する。
 //
-// 拒否したときはKVに書き込まない。ここで加算してしまうと、上限超過中の
-// リクエストが来るたびにTTLが延長され、拒否され続ける限りカウンタが
-// 実質的に無期限化してしまう（本来は日が変われば自然に消えてほしい）。
+// 判定・非加算の詳細は `RateLimiter.checkAndBump`（worker/rateLimitDo.ts）
+// 側の実装とコメントを参照（KV版と完全に一致することをレビュー済み）。
 export async function checkAndBump(
-  kv: KvStore,
+  ns: DurableObjectNamespace<RateLimiter>,
   key: string,
   limit: number,
-  ttlSeconds: number = DEFAULT_TTL_SECONDS,
+  ttlSeconds: number = RATE_LIMIT_TTL_SECONDS,
 ): Promise<boolean> {
-  const current = parseCount(await kv.get(key));
-  if (current >= limit) return false;
-  await kv.put(key, String(current + 1), { expirationTtl: ttlSeconds });
-  return true;
+  // 識別子ごとに別インスタンスにする。IPごと・メールごとに独立するので
+  // 互いに待たされない
+  const stub = ns.get(ns.idFromName(key));
+  return stub.checkAndBump(key, limit, ttlSeconds);
 }

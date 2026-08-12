@@ -1,6 +1,24 @@
 import { describe, expect, it, vi } from "vitest";
 import type { AppEnv } from "./env";
 
+// ⚠️ `worker/index.ts` は `export { RateLimiter } from "./rateLimitDo"` を持つ
+// （デプロイ時に `Class "RateLimiter" not found` にならないため必須）。
+// `./rateLimitDo` は `import { DurableObject } from "cloudflare:workers"` を
+// 使っており、これはworkerdが提供する仮想モジュールでプレーンなNode上の
+// Vitestでは解決できない。`worker/rateLimitDo.test.ts` と同じ理由・同じ形の
+// スタブで、この1指定子だけを差し替える（詳しくは同ファイルのコメント参照）。
+vi.mock("cloudflare:workers", () => {
+  class DurableObject<Env = unknown> {
+    ctx: DurableObjectState;
+    env: Env;
+    constructor(ctx: DurableObjectState, env: Env) {
+      this.ctx = ctx;
+      this.env = env;
+    }
+  }
+  return { DurableObject };
+});
+
 /**
  * `/api/health` 自体は例外を投げない（現時点では顕在化しないバグのため）。
  * `json()` をこのテストファイルの中だけ例外を投げる実装に差し替えることで、
@@ -29,6 +47,7 @@ function makeEnv(): AppEnv {
     APP_URL: "https://lifeplan.nexeed-lab.com",
     RESEND_API_KEY: "test-unused",
     RATE_LIMIT: {} as never,
+    RATE_LIMITER: {} as never,
     TURNSTILE_SECRET_KEY: "test-unused",
   };
 }

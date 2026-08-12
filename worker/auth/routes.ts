@@ -151,7 +151,7 @@ export async function checkIpRateLimit(
 ): Promise<boolean> {
   if (!ip) return true;
   const key = `rl:${scope}:${todayUtc()}:${await hashForKey(toRateLimitIdentity(ip))}`;
-  return checkAndBump(env.RATE_LIMIT, key, limit);
+  return checkAndBump(env.RATE_LIMITER, key, limit);
 }
 
 /** リクエストボディを安全に JSON として読む。壊れた本文でも例外を投げない。 */
@@ -256,7 +256,7 @@ async function handleLogin(request: Request, env: AppEnv): Promise<Response> {
   // 置くと「枠が減ったかどうか」からアカウントの実在が漏れる
   // （forgot-password の考え方と同じ。上のコメント・reset.ts 参照）。
   const loginEmailRateLimitKey = `rl:login-email:${todayUtc()}:${await hashForKey(email)}`;
-  if (!(await checkAndBump(env.RATE_LIMIT, loginEmailRateLimitKey, LOGIN_EMAIL_DAILY_LIMIT))) {
+  if (!(await checkAndBump(env.RATE_LIMITER, loginEmailRateLimitKey, LOGIN_EMAIL_DAILY_LIMIT))) {
     return rateLimited();
   }
 

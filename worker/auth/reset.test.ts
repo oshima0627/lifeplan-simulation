@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppEnv } from "../env";
-import { hashForKey, todayUtc, type KvStore } from "../rateLimit";
+import { hashForKey, todayUtc } from "../rateLimit";
+import type { RateLimiter } from "../rateLimitDo";
 import { handleResetRoute, RESET_TOKEN_TTL_MINUTES } from "./reset";
 import { hashToken } from "./session";
 
@@ -95,16 +96,49 @@ class FakeD1 {
   };
 }
 
-function fakeRateLimitKv(): KvStore {
-  const store = new Map<string, string>();
-  return {
-    async get(key) {
-      return store.get(key) ?? null;
+interface StoredCounter {
+  date: string;
+  count: number;
+}
+
+/**
+ * env.RATE_LIMITER（DurableObjectNamespace<RateLimiter>）のスタブ。
+ * worker/rateLimit.test.ts の fakeRateLimiterNamespace と同型（DOの判断
+ * ロジック自体は worker/rateLimitDo.test.ts でレビュー済みなので、ここでは
+ * KVスタブと同じ「Mapで日次カウンタを覚える」振る舞いを再現するだけでよい）。
+ *
+ * `writes` は「許可されて実際に書き込みが発生した回数」の総計。IP別・
+ * メール別のどちらのスコープ（キー）でも同じ Namespace を使い回す限り
+ * 積み上がるので、「IP側の上限超過後はメール側の書き込みも増えない」
+ * （I-1の再発防止）をこの1カウンタで検証できる。
+ */
+function fakeRateLimiterNamespace() {
+  const rows = new Map<string, StoredCounter>();
+  let writes = 0;
+
+  const ns = {
+    idFromName(name: string) {
+      return { toString: () => name } as DurableObjectId;
     },
-    async put(key, value) {
-      store.set(key, value);
+    get(id: DurableObjectId) {
+      const name = id.toString();
+      return {
+        // 実物の RateLimiter.checkAndBump と同じシグネチャに揃えるためだけの引数
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        async checkAndBump(_key: string, limit: number, _ttlSeconds: number): Promise<boolean> {
+          const today = todayUtc();
+          const existing = rows.get(name);
+          const current = existing && existing.date === today ? existing.count : 0;
+          if (current >= limit) return false;
+          rows.set(name, { date: today, count: current + 1 });
+          writes++;
+          return true;
+        },
+      };
     },
-  };
+  } as unknown as DurableObjectNamespace<RateLimiter>;
+
+  return { ns, rows, getWrites: () => writes };
 }
 
 function resendSuccessResponse(): Response {
@@ -150,14 +184,29 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-function makeEnv(db: FakeD1, rateLimitKv: KvStore = fakeRateLimitKv()): AppEnv {
+// env.RATE_LIMIT（KV）はもう読み書きされないが、wrangler.jsonc にバインディングが
+// 残っている間は AppEnv の型上も必須。誤って参照されたら気付けるよう例外を投げる。
+const UNUSED_RATE_LIMIT_KV = {
+  get() {
+    throw new Error("env.RATE_LIMIT は使われていないはず（DOへ移行済み）");
+  },
+  put() {
+    throw new Error("env.RATE_LIMIT は使われていないはず（DOへ移行済み）");
+  },
+} as unknown as AppEnv["RATE_LIMIT"];
+
+function makeEnv(
+  db: FakeD1,
+  rateLimiterNs: DurableObjectNamespace<RateLimiter> = fakeRateLimiterNamespace().ns,
+): AppEnv {
   return {
     ASSETS: { fetch: vi.fn() } as unknown as AppEnv["ASSETS"],
     DB: db as unknown as AppEnv["DB"],
     MAIL_FROM: "ライフプランシミュレーター <noreply@nexeed-lab.com>",
     APP_URL: "https://lifeplan.nexeed-lab.com",
     RESEND_API_KEY: "test-unused",
-    RATE_LIMIT: rateLimitKv as unknown as AppEnv["RATE_LIMIT"],
+    RATE_LIMIT: UNUSED_RATE_LIMIT_KV,
+    RATE_LIMITER: rateLimiterNs,
     TURNSTILE_SECRET_KEY: "test-unused",
   };
 }
@@ -187,10 +236,10 @@ function req(
 async function call(
   request: Request,
   db: FakeD1,
-  rateLimitKv?: KvStore,
+  rateLimiterNs?: DurableObjectNamespace<RateLimiter>,
   ctx?: ExecutionContext,
 ): Promise<Response> {
-  const env = makeEnv(db, rateLimitKv);
+  const env = makeEnv(db, rateLimiterNs);
   const res = await handleResetRoute(request, env, new URL(request.url), ctx ?? makeCtx().ctx);
   if (!res) throw new Error("handleResetRoute returned null for a known reset path");
   return res;
@@ -332,34 +381,34 @@ describe("forgot-password: 登録済みアドレスだけトークンを発行�
 });
 
 describe("forgot-password: レート制限はアドレスの有無に関わらず消費する", () => {
-  it("未登録アドレスへの1回目の呼び出しでもメール単位のKVの枠が消費される", async () => {
+  it("未登録アドレスへの1回目の呼び出しでもメール単位のDOの枠が消費される", async () => {
     const db = new FakeD1();
-    const kv = fakeRateLimitKv();
+    const { ns, rows } = fakeRateLimiterNamespace();
     const email = "nobody-rl@example.com";
 
-    await call(req("POST", FORGOT_URL, { body: { email } }), db, kv);
+    await call(req("POST", FORGOT_URL, { body: { email } }), db, ns);
 
     // M-1: メール別のスコープは forgot-password-email（forgot-password-ip とは別名前空間）
     const key = `rl:forgot-password-email:${todayUtc()}:${await hashForKey(email)}`;
-    expect(await kv.get(key)).toBe("1");
+    expect(rows.get(key)).toEqual({ date: todayUtc(), count: 1 });
   });
 
-  it("未登録IPからの1回目の呼び出しでもIP単位のKVの枠が消費される", async () => {
+  it("未登録IPからの1回目の呼び出しでもIP単位のDOの枠が消費される", async () => {
     const db = new FakeD1();
-    const kv = fakeRateLimitKv();
+    const { ns, rows } = fakeRateLimiterNamespace();
     const ip = "203.0.113.9";
 
-    await call(req("POST", FORGOT_URL, { body: { email: "someone@example.com" }, ip }), db, kv);
+    await call(req("POST", FORGOT_URL, { body: { email: "someone@example.com" }, ip }), db, ns);
 
     // M-1: IP別のスコープは forgot-password-ip（forgot-password-email とは別名前空間）
     const key = `rl:forgot-password-ip:${todayUtc()}:${await hashForKey(ip)}`;
-    expect(await kv.get(key)).toBe("1");
+    expect(rows.get(key)).toEqual({ date: todayUtc(), count: 1 });
   });
 
   it("登録済みアドレスがメール単位の上限を超えると、それ以降はトークンもメールも発行しない（応答は変えない）", async () => {
     const db = new FakeD1();
     db.users.push({ id: "user-1", email: "limited@example.com", passwordHash: "irrelevant" });
-    const kv = fakeRateLimitKv();
+    const { ns } = fakeRateLimiterNamespace();
     const fetchImpl = vi.fn().mockImplementation(async () => resendSuccessResponse());
     vi.stubGlobal("fetch", fetchImpl);
     const ctxHelper = makeCtx();
@@ -368,7 +417,7 @@ describe("forgot-password: レート制限はアドレスの有無に関わら�
       const res = await call(
         req("POST", FORGOT_URL, { body: { email: "limited@example.com" } }),
         db,
-        kv,
+        ns,
         ctxHelper.ctx,
       );
       expect(res.status).toBe(200);
@@ -383,7 +432,7 @@ describe("forgot-password: レート制限はアドレスの有無に関わら�
   it("IP単位の上限を超えると、初めて使う登録済みアドレスでもトークンを発行しない（I-3）", async () => {
     const db = new FakeD1();
     db.users.push({ id: "victim-1", email: "victim@example.com", passwordHash: "irrelevant" });
-    const kv = fakeRateLimitKv();
+    const { ns } = fakeRateLimiterNamespace();
     const ip = "203.0.113.50";
     const ctxHelper = makeCtx();
 
@@ -392,7 +441,7 @@ describe("forgot-password: レート制限はアドレスの有無に関わら�
       const res = await call(
         req("POST", FORGOT_URL, { body: { email: `filler-${i}@example.com` }, ip }),
         db,
-        kv,
+        ns,
         ctxHelper.ctx,
       );
       expect(res.status).toBe(200);
@@ -403,7 +452,7 @@ describe("forgot-password: レート制限はアドレスの有無に関わら�
     const res = await call(
       req("POST", FORGOT_URL, { body: { email: "victim@example.com" }, ip }),
       db,
-      kv,
+      ns,
       ctxHelper.ctx,
     );
     expect(res.status).toBe(200);
@@ -413,57 +462,48 @@ describe("forgot-password: レート制限はアドレスの有無に関わら�
     expect(db.resets).toHaveLength(0);
   });
 
-  it("IP側の上限を超えた後は、宛先を変え続けてもメール別KVへの書き込みが増えない（I-1の再発防止）", async () => {
+  it("IP側の上限を超えた後は、宛先を変え続けてもメール別DOへの書き込みが増えない（I-1の再発防止）", async () => {
     const db = new FakeD1();
-    const store = new Map<string, string>();
-    let putCalls = 0;
-    const kv: KvStore = {
-      async get(key) {
-        return store.get(key) ?? null;
-      },
-      async put(key, value) {
-        putCalls++;
-        store.set(key, value);
-      },
-    };
+    const { ns, getWrites } = fakeRateLimiterNamespace();
     const ip = "203.0.113.51";
     const ctxHelper = makeCtx();
 
     // IP側の枠（30回/日）を、別々の宛先で使い切る
-    // （このループだけで IP側30回分 + メール側30回分の put が発生する）
+    // （このループだけで IP側30回分 + メール側30回分の書き込みが発生する）
     for (let i = 0; i < FORGOT_PASSWORD_IP_DAILY_LIMIT; i++) {
       await call(
         req("POST", FORGOT_URL, { body: { email: `filler-${i}@example.com` }, ip }),
         db,
-        kv,
+        ns,
         ctxHelper.ctx,
       );
     }
-    const putsAfterIpLimitReached = putCalls;
+    const writesAfterIpLimitReached = getWrites();
 
     // 31回目以降、宛先を変え続けてもIP側はもう書き込まれない（checkAndBump は
-    // 上限到達時にKVへ書かない設計）。修正前はここでメール側の書き込みだけが
-    // 無制限に増え続けていた（Workers Free の 1,000 writes/日 を1IPで枯渇させ、
-    // /api/auth/* 全体が 500 に落ちる経路だった）。
+    // 上限到達時にDOへ書かない設計）。修正前はここでメール側の書き込みだけが
+    // 無制限に増え続けていた（Workers Free の KV 1,000 writes/日 を1IPで
+    // 枯渇させ、/api/auth/* 全体が 500 に落ちる経路だった。DOへ移した今も
+    // 同じ不変条件を守る）。
     for (let i = 0; i < 50; i++) {
       const res = await call(
         req("POST", FORGOT_URL, { body: { email: `overflow-${i}@example.com` }, ip }),
         db,
-        kv,
+        ns,
         ctxHelper.ctx,
       );
       expect(res.status).toBe(200);
     }
 
-    expect(putCalls).toBe(putsAfterIpLimitReached);
+    expect(getWrites()).toBe(writesAfterIpLimitReached);
   });
 
   it("cf-connecting-ip が無いときはIP単位の制限がかからない（ローカル開発対応）", async () => {
     const db = new FakeD1();
-    const kv = fakeRateLimitKv();
+    const { ns } = fakeRateLimiterNamespace();
 
     for (let i = 0; i < FORGOT_PASSWORD_IP_DAILY_LIMIT + 5; i++) {
-      const res = await call(req("POST", FORGOT_URL, { body: { email: `no-ip-${i}@example.com` } }), db, kv);
+      const res = await call(req("POST", FORGOT_URL, { body: { email: `no-ip-${i}@example.com` } }), db, ns);
       expect(res.status).toBe(200);
     }
   });
@@ -606,7 +646,7 @@ describe("reset-password: トークンの消費と全セッション削除", () 
 describe("reset-password: IP別レート制限（60回/日、I-3）", () => {
   it("同一IPから61回目は 429 / RATE_LIMITED になる", async () => {
     const db = new FakeD1();
-    const kv = fakeRateLimitKv();
+    const { ns } = fakeRateLimiterNamespace();
     const ip = "198.51.100.77";
     let last: Response | undefined;
 
@@ -614,7 +654,7 @@ describe("reset-password: IP別レート制限（60回/日、I-3）", () => {
       last = await call(
         req("POST", RESET_URL, { body: { token: `t-${i}`, key: KEY, kdfVersion: KDF_VERSION }, ip }),
         db,
-        kv,
+        ns,
       );
     }
 
@@ -624,13 +664,13 @@ describe("reset-password: IP別レート制限（60回/日、I-3）", () => {
 
   it("cf-connecting-ip が無いときは何回呼んでも制限がかからない（ローカル開発対応）", async () => {
     const db = new FakeD1();
-    const kv = fakeRateLimitKv();
+    const { ns } = fakeRateLimiterNamespace();
 
     for (let i = 0; i < RESET_PASSWORD_IP_DAILY_LIMIT + 1; i++) {
       const res = await call(
         req("POST", RESET_URL, { body: { token: `t2-${i}`, key: KEY, kdfVersion: KDF_VERSION } }),
         db,
-        kv,
+        ns,
       );
       expect(res.status).not.toBe(429);
     }

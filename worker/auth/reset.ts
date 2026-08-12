@@ -162,7 +162,7 @@ async function handleForgotPassword(request: Request, env: AppEnv, ctx: Executio
   // I-1: IP側が既に上限に達していたら、メール側は消費しない（上のJSDoc参照）。
   const emailRateLimitKey = `rl:forgot-password-email:${todayUtc()}:${await hashForKey(email)}`;
   const emailAllowed = ipAllowed
-    ? await checkAndBump(env.RATE_LIMIT, emailRateLimitKey, FORGOT_PASSWORD_EMAIL_DAILY_LIMIT)
+    ? await checkAndBump(env.RATE_LIMITER, emailRateLimitKey, FORGOT_PASSWORD_EMAIL_DAILY_LIMIT)
     : false;
 
   // 上限に達していたら、トークン発行もメール送信もしない。ここでも応答を

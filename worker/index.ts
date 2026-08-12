@@ -3,6 +3,11 @@ import { handleAuthRoute } from "./auth/routes";
 import type { AppEnv } from "./env";
 import { errorResponse, json } from "./http";
 
+// レート制限用 Durable Object。wrangler.jsonc の durable_objects.bindings /
+// migrations（new_sqlite_classes）と対になる。この export が無いと
+// デプロイ時に `Class "RateLimiter" not found` で落ちる。
+export { RateLimiter } from "./rateLimitDo";
+
 /**
  * Worker のエントリ。
  *

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppEnv } from "../env";
-import { hashForKey, todayUtc, type KvStore } from "../rateLimit";
+import { hashForKey, todayUtc } from "../rateLimit";
+import type { RateLimiter } from "../rateLimitDo";
 import { hashToken } from "./session";
 import { checkIpRateLimit, handleAuthRoute } from "./routes";
 
@@ -92,17 +93,42 @@ class FakeD1 {
   };
 }
 
-/** env.RATE_LIMIT のスタブ。Map ベースの素朴な実装（worker/rateLimit.test.ts と同型）。 */
-function fakeRateLimitKv(): KvStore {
-  const store = new Map<string, string>();
-  return {
-    async get(key) {
-      return store.get(key) ?? null;
+interface StoredCounter {
+  date: string;
+  count: number;
+}
+
+/**
+ * env.RATE_LIMITER（DurableObjectNamespace<RateLimiter>）のスタブ。
+ * worker/rateLimit.test.ts の fakeRateLimiterNamespace と同型（DOの判断
+ * ロジック自体は worker/rateLimitDo.test.ts でレビュー済みなので、ここでは
+ * KVスタブと同じ「Mapで日次カウンタを覚える」振る舞いを再現するだけでよい）。
+ */
+function fakeRateLimiterNamespace() {
+  const rows = new Map<string, StoredCounter>();
+
+  const ns = {
+    idFromName(name: string) {
+      return { toString: () => name } as DurableObjectId;
     },
-    async put(key, value) {
-      store.set(key, value);
+    get(id: DurableObjectId) {
+      const name = id.toString();
+      return {
+        // 実物の RateLimiter.checkAndBump と同じシグネチャに揃えるためだけの引数
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        async checkAndBump(_key: string, limit: number, _ttlSeconds: number): Promise<boolean> {
+          const today = todayUtc();
+          const existing = rows.get(name);
+          const current = existing && existing.date === today ? existing.count : 0;
+          if (current >= limit) return false;
+          rows.set(name, { date: today, count: current + 1 });
+          return true;
+        },
+      };
     },
-  };
+  } as unknown as DurableObjectNamespace<RateLimiter>;
+
+  return { ns, rows };
 }
 
 function turnstileSiteverifyResponse(success: boolean): Response {
@@ -130,14 +156,29 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-function makeEnv(db: FakeD1, rateLimitKv: KvStore = fakeRateLimitKv()): AppEnv {
+// env.RATE_LIMIT（KV）はもう読み書きされないが、wrangler.jsonc にバインディングが
+// 残っている間は AppEnv の型上も必須。誤って参照されたら気付けるよう例外を投げる。
+const UNUSED_RATE_LIMIT_KV = {
+  get() {
+    throw new Error("env.RATE_LIMIT は使われていないはず（DOへ移行済み）");
+  },
+  put() {
+    throw new Error("env.RATE_LIMIT は使われていないはず（DOへ移行済み）");
+  },
+} as unknown as AppEnv["RATE_LIMIT"];
+
+function makeEnv(
+  db: FakeD1,
+  rateLimiterNs: DurableObjectNamespace<RateLimiter> = fakeRateLimiterNamespace().ns,
+): AppEnv {
   return {
     ASSETS: { fetch: vi.fn() } as unknown as AppEnv["ASSETS"],
     DB: db as unknown as AppEnv["DB"],
     MAIL_FROM: "ライフプランシミュレーター <noreply@nexeed-lab.com>",
     APP_URL: "https://lifeplan.nexeed-lab.com",
     RESEND_API_KEY: "test-unused",
-    RATE_LIMIT: rateLimitKv as unknown as AppEnv["RATE_LIMIT"],
+    RATE_LIMIT: UNUSED_RATE_LIMIT_KV,
+    RATE_LIMITER: rateLimiterNs,
     TURNSTILE_SECRET_KEY: "test-turnstile-secret",
   };
 }
@@ -161,12 +202,16 @@ function req(
 }
 
 /**
- * @param rateLimitKv 複数回の呼び出しでレート制限カウンタを積み上げたいときだけ、
- *   同じ KvStore を明示的に使い回す。省略時は呼び出しごとに新しい（空の）KVになる
- *   ので、通常の単発テストではレート制限が一切影響しない。
+ * @param rateLimiterNs 複数回の呼び出しでレート制限カウンタを積み上げたいときだけ、
+ *   同じ DurableObjectNamespace スタブを明示的に使い回す。省略時は呼び出しごとに
+ *   新しい（空の）ものになるので、通常の単発テストではレート制限が一切影響しない。
  */
-async function call(request: Request, db: FakeD1, rateLimitKv?: KvStore): Promise<Response> {
-  const env = makeEnv(db, rateLimitKv);
+async function call(
+  request: Request,
+  db: FakeD1,
+  rateLimiterNs?: DurableObjectNamespace<RateLimiter>,
+): Promise<Response> {
+  const env = makeEnv(db, rateLimiterNs);
   const res = await handleAuthRoute(request, env, new URL(request.url));
   if (!res) throw new Error("handleAuthRoute returned null for a known auth path");
   return res;
@@ -477,7 +522,7 @@ describe("signup: Turnstile 検証（D1に触る前に行う）", () => {
 describe("signup: IP別レート制限（1日10回まで）", () => {
   it("同一IPから11回目は 429 / RATE_LIMITED になる", async () => {
     const db = new FakeD1();
-    const kv = fakeRateLimitKv();
+    const { ns } = fakeRateLimiterNamespace();
     let last: Response | undefined;
 
     for (let i = 0; i < SIGNUP_IP_DAILY_LIMIT + 1; i++) {
@@ -487,7 +532,7 @@ describe("signup: IP別レート制限（1日10回まで）", () => {
           ip: "203.0.113.10",
         }),
         db,
-        kv,
+        ns,
       );
     }
 
@@ -499,7 +544,7 @@ describe("signup: IP別レート制限（1日10回まで）", () => {
 
   it("レート制限の応答に理由が含まれない（メッセージにIPや上限といった語を出さない）", async () => {
     const db = new FakeD1();
-    const kv = fakeRateLimitKv();
+    const { ns } = fakeRateLimiterNamespace();
     let last: Response | undefined;
 
     for (let i = 0; i < SIGNUP_IP_DAILY_LIMIT + 1; i++) {
@@ -509,7 +554,7 @@ describe("signup: IP別レート制限（1日10回まで）", () => {
           ip: "203.0.113.11",
         }),
         db,
-        kv,
+        ns,
       );
     }
 
@@ -520,7 +565,7 @@ describe("signup: IP別レート制限（1日10回まで）", () => {
 
   it("cf-connecting-ip が無いときは何回呼んでも制限がかからない（ローカル開発対応）", async () => {
     const db = new FakeD1();
-    const kv = fakeRateLimitKv();
+    const { ns } = fakeRateLimiterNamespace();
 
     for (let i = 0; i < SIGNUP_IP_DAILY_LIMIT + 1; i++) {
       const res = await call(
@@ -528,7 +573,7 @@ describe("signup: IP別レート制限（1日10回まで）", () => {
           body: signupBody(`no-ip-${i}@example.com`),
         }),
         db,
-        kv,
+        ns,
       );
       expect(res.status).not.toBe(429);
     }
@@ -538,7 +583,7 @@ describe("signup: IP別レート制限（1日10回まで）", () => {
 describe("login: IP別レート制限（1日30回まで）", () => {
   it("同一IPから31回目は 429 / RATE_LIMITED になる", async () => {
     const db = new FakeD1();
-    const kv = fakeRateLimitKv();
+    const { ns } = fakeRateLimiterNamespace();
     let last: Response | undefined;
 
     for (let i = 0; i < LOGIN_IP_DAILY_LIMIT + 1; i++) {
@@ -548,7 +593,7 @@ describe("login: IP別レート制限（1日30回まで）", () => {
           ip: "198.51.100.20",
         }),
         db,
-        kv,
+        ns,
       );
     }
 
@@ -558,7 +603,7 @@ describe("login: IP別レート制限（1日30回まで）", () => {
 
   it("cf-connecting-ip が無いときは何回呼んでも制限がかからない（ローカル開発対応）", async () => {
     const db = new FakeD1();
-    const kv = fakeRateLimitKv();
+    const { ns } = fakeRateLimiterNamespace();
 
     // メールアドレスは呼び出しごとに変える。IP側の上限（このテストの本題）と、
     // I-3 で追加したメール別の上限（20回/日）を混同しないため
@@ -571,7 +616,7 @@ describe("login: IP別レート制限（1日30回まで）", () => {
           body: { email: `nobody-noip-${i}@example.com`, key: KEY, kdfVersion: KDF_VERSION },
         }),
         db,
-        kv,
+        ns,
       );
       expect(res.status).not.toBe(429);
     }
@@ -581,7 +626,7 @@ describe("login: IP別レート制限（1日30回まで）", () => {
 describe("login: メールアドレス別レート制限（1日20回まで、I-3）", () => {
   it("同一メールアドレスへの21回目は 429 / RATE_LIMITED になる（IPは無制限）", async () => {
     const db = new FakeD1();
-    const kv = fakeRateLimitKv();
+    const { ns } = fakeRateLimiterNamespace();
     let last: Response | undefined;
 
     // IPを付けない（IP側の30回/日には掛からない状態で、メール側の20回/日だけを見る）
@@ -591,7 +636,7 @@ describe("login: メールアドレス別レート制限（1日20回まで、I-3
           body: { email: "target@example.com", key: KEY, kdfVersion: KDF_VERSION },
         }),
         db,
-        kv,
+        ns,
       );
     }
 
@@ -601,7 +646,7 @@ describe("login: メールアドレス別レート制限（1日20回まで、I-3
 
   it("存在しないユーザーでもメール別の枠は消費される（存在確認より前に消費するため、I-3）", async () => {
     const db = new FakeD1();
-    const kv = fakeRateLimitKv();
+    const { ns, rows } = fakeRateLimiterNamespace();
     const email = "never-registered@example.com";
 
     await call(
@@ -609,16 +654,16 @@ describe("login: メールアドレス別レート制限（1日20回まで、I-3
         body: { email, key: KEY, kdfVersion: KDF_VERSION },
       }),
       db,
-      kv,
+      ns,
     );
 
     const key = `rl:login-email:${todayUtc()}:${await hashForKey(email)}`;
-    expect(await kv.get(key)).toBe("1");
+    expect(rows.get(key)).toEqual({ date: todayUtc(), count: 1 });
   });
 
   it("メールアドレスが違えば互いに枠を消費しない", async () => {
     const db = new FakeD1();
-    const kv = fakeRateLimitKv();
+    const { ns } = fakeRateLimiterNamespace();
 
     for (let i = 0; i < LOGIN_EMAIL_DAILY_LIMIT + 1; i++) {
       const res = await call(
@@ -626,7 +671,7 @@ describe("login: メールアドレス別レート制限（1日20回まで、I-3
           body: { email: `distinct-${i}@example.com`, key: KEY, kdfVersion: KDF_VERSION },
         }),
         db,
-        kv,
+        ns,
       );
       expect(res.status).not.toBe(429);
     }
@@ -635,8 +680,8 @@ describe("login: メールアドレス別レート制限（1日20回まで、I-3
 
 describe("checkIpRateLimit: IPv6 は /64 に丸めてから数える（I-2）", () => {
   it("同じ/64の異なるアドレスは同じキーとして数えられる", async () => {
-    const kv = fakeRateLimitKv();
-    const env: AppEnv = makeEnv(new FakeD1(), kv);
+    const { ns } = fakeRateLimiterNamespace();
+    const env: AppEnv = makeEnv(new FakeD1(), ns);
 
     const first = await checkIpRateLimit(env, "2001:db8:1:2::1", "test-v6", 2);
     const second = await checkIpRateLimit(env, "2001:db8:1:2::ffff", "test-v6", 2);
@@ -649,8 +694,8 @@ describe("checkIpRateLimit: IPv6 は /64 に丸めてから数える（I-2）", 
   });
 
   it("異なる/64は別のキーとして数えられる", async () => {
-    const kv = fakeRateLimitKv();
-    const env: AppEnv = makeEnv(new FakeD1(), kv);
+    const { ns } = fakeRateLimiterNamespace();
+    const env: AppEnv = makeEnv(new FakeD1(), ns);
 
     const a = await checkIpRateLimit(env, "2001:db8:1:2::1", "test-v6-distinct", 1);
     const b = await checkIpRateLimit(env, "2001:db8:1:3::1", "test-v6-distinct", 1);
@@ -661,8 +706,8 @@ describe("checkIpRateLimit: IPv6 は /64 に丸めてから数える（I-2）", 
   });
 
   it("'::' の省略記法を含む形でも正しく/64が求まる（展開形と同じキーになる）", async () => {
-    const kv = fakeRateLimitKv();
-    const env: AppEnv = makeEnv(new FakeD1(), kv);
+    const { ns } = fakeRateLimiterNamespace();
+    const env: AppEnv = makeEnv(new FakeD1(), ns);
 
     // "2001:db8::1" は先頭64bitが "2001:0db8:0000:0000"。
     // 展開形（省略なし・先頭ゼロあり）で同じ64bitを表すアドレスと同じバケツになるはず
@@ -680,8 +725,8 @@ describe("checkIpRateLimit: IPv6 は /64 に丸めてから数える（I-2）", 
   });
 
   it("'::' が末尾側や先頭64bitの境界をまたぐ場合でも正しく丸められる", async () => {
-    const kv = fakeRateLimitKv();
-    const env: AppEnv = makeEnv(new FakeD1(), kv);
+    const { ns } = fakeRateLimiterNamespace();
+    const env: AppEnv = makeEnv(new FakeD1(), ns);
 
     // "2001:db8::" の先頭64bitは "2001:0db8:0000:0000"（"::"が境界をまたいで
     // 前半2グループ・後半0グループを埋める）。同じ64bitを明示的に書いた
@@ -694,8 +739,8 @@ describe("checkIpRateLimit: IPv6 は /64 に丸めてから数える（I-2）", 
   });
 
   it("IPv4はそのまま（丸めずに）使われる", async () => {
-    const kv = fakeRateLimitKv();
-    const env: AppEnv = makeEnv(new FakeD1(), kv);
+    const { ns, rows } = fakeRateLimiterNamespace();
+    const env: AppEnv = makeEnv(new FakeD1(), ns);
 
     const a = await checkIpRateLimit(env, "203.0.113.10", "test-v4", 1);
     const b = await checkIpRateLimit(env, "203.0.113.11", "test-v4", 1);
@@ -705,6 +750,6 @@ describe("checkIpRateLimit: IPv6 は /64 に丸めてから数える（I-2）", 
     expect(b).toBe(true);
 
     const key = `rl:test-v4:${todayUtc()}:${await hashForKey("203.0.113.10")}`;
-    expect(await kv.get(key)).toBe("1");
+    expect(rows.get(key)).toEqual({ date: todayUtc(), count: 1 });
   });
 });
