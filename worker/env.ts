@@ -31,4 +31,16 @@
 export interface AppEnv extends Env {
   RESEND_API_KEY: string;
   TURNSTILE_SECRET_KEY: string;
+  /**
+   * Stripe の秘密鍵と Webhook 署名シークレット。どちらも `wrangler secret put` で
+   * 投入する。`wrangler.jsonc` の `vars` に書くと Cloudflare ダッシュボードから
+   * 平文で見えてしまう。
+   *
+   * 一方 `STRIPE_PRICE_ID` は公開されても害が無い（価格の識別子であって
+   * 権限は持たない）ので `vars` に置く。`vars` は `wrangler types` の生成物に
+   * 出るため、ここでは再宣言しない（再宣言するとリテラル型より広くなって
+   * 型検査が落ちる。`APP_URL` と同じ理由）。
+   */
+  STRIPE_SECRET_KEY: string;
+  STRIPE_WEBHOOK_SECRET: string;
 }

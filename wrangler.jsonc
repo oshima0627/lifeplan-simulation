@@ -47,7 +47,13 @@
     "MAIL_FROM": "ライフプランシミュレーター <noreply@nexeed-lab.com>",
     // パスワード再設定メールのリンク組み立てに使う正規オリジン。
     // Request.url から導出しない理由は worker/env.ts の AppEnv["APP_URL"] コメント参照
-    "APP_URL": "https://lifeplan.nexeed-lab.com"
+    "APP_URL": "https://lifeplan.nexeed-lab.com",
+    // Stripe の Price ID。価格の識別子であって権限は持たないので公開値でよい。
+    // 金額をコードに書かないことで、値上げ・値下げが Stripe 側だけで完結する。
+    // ⚠️ STRIPE_SECRET_KEY / STRIPE_WEBHOOK_SECRET は絶対にここへ置かない
+    // （ダッシュボードから平文で見える）。wrangler secret put で投入する。
+    // TODO(利用者本人): Stripe で月額1,980円の Price を作り、その ID に差し替える
+    "STRIPE_PRICE_ID": "price_REPLACE_ME"
   },
   // `routes` が1件あれば wrangler は workers_dev を暗黙に無効化するが、
   // その暗黙の挙動に安全性（再設定リンクのオリジンがぶれないこと）を

@@ -1,5 +1,7 @@
 import { handleResetRoute } from "./auth/reset";
 import { handleAuthRoute } from "./auth/routes";
+import { handleBillingRoute } from "./billing/routes";
+import { handleStripeWebhook } from "./billing/webhook";
 import type { AppEnv } from "./env";
 import { errorResponse, json } from "./http";
 
@@ -41,8 +43,16 @@ const worker = {
         return json({ ok: true });
       }
 
+      // ⚠️ 認証より前に置く。Stripe はこちらのセッション Cookie を持たないため、
+      // 認証を要求するルータの後ろに置くと署名検証まで到達できない
+      const webhookResponse = await handleStripeWebhook(request, env, url);
+      if (webhookResponse) return webhookResponse;
+
       const authResponse = await handleAuthRoute(request, env, url);
       if (authResponse) return authResponse;
+
+      const billingResponse = await handleBillingRoute(request, env, url);
+      if (billingResponse) return billingResponse;
 
       const resetResponse = await handleResetRoute(request, env, url, ctx);
       if (resetResponse) return resetResponse;

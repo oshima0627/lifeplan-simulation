@@ -49,6 +49,11 @@ function makeEnv(): AppEnv {
     RATE_LIMIT: {} as never,
     RATE_LIMITER: {} as never,
     TURNSTILE_SECRET_KEY: "test-unused",
+    STRIPE_SECRET_KEY: "sk_test_unused",
+    STRIPE_WEBHOOK_SECRET: "whsec_test_unused",
+    // vars はリテラル型で生成されるため、実IDに差し替えた時に
+    // テストが壊れないようキャストで受ける
+    STRIPE_PRICE_ID: "price_test_unused" as AppEnv["STRIPE_PRICE_ID"],
   };
 }
 
