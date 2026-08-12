@@ -8,6 +8,14 @@
     "directory": "./out",
     "not_found_handling": "404-page"
   },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "lifeplan",
+      "database_id": "15dfcc4a-14f4-487b-b22d-bdf189c062d9",
+      "migrations_dir": "d1/migrations"
+    }
+  ],
   "routes": [
     {
       "pattern": "lifeplan.nexeed-lab.com",
