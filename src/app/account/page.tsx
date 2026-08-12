@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import PlanCard from "@/components/billing/PlanCard";
 import { fetchMe, logout } from "@/lib/auth/client";
 
 type Status = "loading" | "loggedIn" | "loggedOut";
@@ -68,6 +69,8 @@ export default function AccountPage() {
           >
             {loggingOut ? "処理中…" : "ログアウト"}
           </button>
+          {/* 契約状態はログイン後にしか意味が無いので、ここでだけ描画する */}
+          <PlanCard />
         </div>
       )}
     </main>
