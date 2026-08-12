@@ -173,7 +173,7 @@ describe("checkAndBump", () => {
 
 - [ ] **Step 2: 失敗を確認する** — `npx vitest run worker/rateLimit.test.ts`
 - [ ] **Step 3: 実装する** — pre-meet の `guard.ts` を参考に書く
-- [ ] **Step 4: 成功を確認する** — 13件 PASS
+- [ ] **Step 4: 成功を確認する** — 12件 PASS
 - [ ] **Step 5: コミット** — `feat: KVによる日次レート制限`
 
 ---
