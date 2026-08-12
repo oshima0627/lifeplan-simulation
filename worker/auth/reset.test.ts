@@ -339,7 +339,8 @@ describe("forgot-password: レート制限はアドレスの有無に関わら�
 
     await call(req("POST", FORGOT_URL, { body: { email } }), db, kv);
 
-    const key = `rl:forgot-password:${todayUtc()}:${await hashForKey(email)}`;
+    // M-1: メール別のスコープは forgot-password-email（forgot-password-ip とは別名前空間）
+    const key = `rl:forgot-password-email:${todayUtc()}:${await hashForKey(email)}`;
     expect(await kv.get(key)).toBe("1");
   });
 
@@ -350,7 +351,8 @@ describe("forgot-password: レート制限はアドレスの有無に関わら�
 
     await call(req("POST", FORGOT_URL, { body: { email: "someone@example.com" }, ip }), db, kv);
 
-    const key = `rl:forgot-password:${todayUtc()}:${await hashForKey(ip)}`;
+    // M-1: IP別のスコープは forgot-password-ip（forgot-password-email とは別名前空間）
+    const key = `rl:forgot-password-ip:${todayUtc()}:${await hashForKey(ip)}`;
     expect(await kv.get(key)).toBe("1");
   });
 
@@ -409,6 +411,51 @@ describe("forgot-password: レート制限はアドレスの有無に関わら�
 
     await ctxHelper.flush();
     expect(db.resets).toHaveLength(0);
+  });
+
+  it("IP側の上限を超えた後は、宛先を変え続けてもメール別KVへの書き込みが増えない（I-1の再発防止）", async () => {
+    const db = new FakeD1();
+    const store = new Map<string, string>();
+    let putCalls = 0;
+    const kv: KvStore = {
+      async get(key) {
+        return store.get(key) ?? null;
+      },
+      async put(key, value) {
+        putCalls++;
+        store.set(key, value);
+      },
+    };
+    const ip = "203.0.113.51";
+    const ctxHelper = makeCtx();
+
+    // IP側の枠（30回/日）を、別々の宛先で使い切る
+    // （このループだけで IP側30回分 + メール側30回分の put が発生する）
+    for (let i = 0; i < FORGOT_PASSWORD_IP_DAILY_LIMIT; i++) {
+      await call(
+        req("POST", FORGOT_URL, { body: { email: `filler-${i}@example.com` }, ip }),
+        db,
+        kv,
+        ctxHelper.ctx,
+      );
+    }
+    const putsAfterIpLimitReached = putCalls;
+
+    // 31回目以降、宛先を変え続けてもIP側はもう書き込まれない（checkAndBump は
+    // 上限到達時にKVへ書かない設計）。修正前はここでメール側の書き込みだけが
+    // 無制限に増え続けていた（Workers Free の 1,000 writes/日 を1IPで枯渇させ、
+    // /api/auth/* 全体が 500 に落ちる経路だった）。
+    for (let i = 0; i < 50; i++) {
+      const res = await call(
+        req("POST", FORGOT_URL, { body: { email: `overflow-${i}@example.com` }, ip }),
+        db,
+        kv,
+        ctxHelper.ctx,
+      );
+      expect(res.status).toBe(200);
+    }
+
+    expect(putCalls).toBe(putsAfterIpLimitReached);
   });
 
   it("cf-connecting-ip が無いときはIP単位の制限がかからない（ローカル開発対応）", async () => {

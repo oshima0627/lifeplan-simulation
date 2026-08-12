@@ -132,8 +132,19 @@ async function issuePasswordResetAndSendMail(env: AppEnv, userId: string, email:
  * レート制限（アドレス別・IP別の両方）は、アドレスが未登録でも必ず消費する。
  * 「登録済みのときだけ枠を使う」形にすると、同じアドレス／IPに何度も
  * リクエストしたときの挙動の違い（＝枠が減るかどうか）から存在の有無が漏れる。
- * `&&` の短絡評価でどちらかの消費が省略されないよう、個別に await してから
- * 結果をまとめて見る。
+ *
+ * ⚠️ ただし IP 側が上限に達した後は、メール側の消費を止める（I-1）。
+ * `checkAndBump` は上限到達時に KV へ書き込まない設計だが、以前はメール側を
+ * `ipAllowed` の結果と無関係に常に呼んでいたため、1つのIPが宛先を変え続ける
+ * だけでメール側カウンタへの書き込みが無制限になっていた（Workers Free の
+ * KV は 1,000 writes/日なので、1IPからの乱打だけで当日の枠を使い切り、
+ * `/api/auth/*` 全体が 500 に落ちる余地があった）。
+ *
+ * `ipAllowed` はメールアドレスと無関係な値（IPだけから決まる）なので、
+ * これでメール側の消費を止めても「登録済みかどうかで挙動が変わる」という
+ * 意味での分岐は外から見えない。守りたいのは飽くまで「同じメールアドレスに
+ * 対する消費が、登録の有無で変わらないこと」であって、IP起因の消費停止は
+ * この不変条件と無関係。
  */
 async function handleForgotPassword(request: Request, env: AppEnv, ctx: ExecutionContext): Promise<Response> {
   const body = await readJsonBody(request);
@@ -143,11 +154,16 @@ async function handleForgotPassword(request: Request, env: AppEnv, ctx: Executio
   // 応答を区別しない。常にここで同じ 200 を返す。
   if (!email) return json({ ok: true });
 
+  // M-1: IP別・メール別で名前空間を分ける（`forgot-password-ip` /
+  // `forgot-password-email`）。ダッシュボードから見たときに区別できるように。
   const ip = request.headers.get("cf-connecting-ip");
-  const ipAllowed = await checkIpRateLimit(env, ip, "forgot-password", FORGOT_PASSWORD_IP_DAILY_LIMIT);
+  const ipAllowed = await checkIpRateLimit(env, ip, "forgot-password-ip", FORGOT_PASSWORD_IP_DAILY_LIMIT);
 
-  const emailRateLimitKey = `rl:forgot-password:${todayUtc()}:${await hashForKey(email)}`;
-  const emailAllowed = await checkAndBump(env.RATE_LIMIT, emailRateLimitKey, FORGOT_PASSWORD_EMAIL_DAILY_LIMIT);
+  // I-1: IP側が既に上限に達していたら、メール側は消費しない（上のJSDoc参照）。
+  const emailRateLimitKey = `rl:forgot-password-email:${todayUtc()}:${await hashForKey(email)}`;
+  const emailAllowed = ipAllowed
+    ? await checkAndBump(env.RATE_LIMIT, emailRateLimitKey, FORGOT_PASSWORD_EMAIL_DAILY_LIMIT)
+    : false;
 
   // 上限に達していたら、トークン発行もメール送信もしない。ここでも応答を
   // 変えないのは同じ理由（枠を使い切ったかどうかが外から見えると、

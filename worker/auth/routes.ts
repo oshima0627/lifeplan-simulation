@@ -13,9 +13,18 @@ import { verifyTurnstile } from "../turnstile";
 import { hashClientKey, readClientKeyInput, verifyClientKey } from "./password";
 import { hashToken, newSessionToken, sessionExpiryIso, SESSION_TTL_DAYS } from "./session";
 
-// IP別・1日あたりの上限（設計書 §7.1 の考え方に合わせる）
+// IP別・1日あたりの上限（設計書 §5.4 の考え方に合わせる）
 const SIGNUP_IP_DAILY_LIMIT = 10;
 const LOGIN_IP_DAILY_LIMIT = 30;
+
+// メールアドレス別・1日あたりの login 失敗上限（I-3）。
+//
+// IP別の上限だけでは、IPv6 の /64 が1契約に払い出される環境（I-2参照）と
+// 組み合わさると「特定アカウントへの総当たり」を防げない
+// （IP側の上限は同一 /64 内の無数のアドレスを渡り歩けば無限に回避できる）。
+// forgot-password の FORGOT_PASSWORD_EMAIL_DAILY_LIMIT と同じ考え方で、
+// アカウント単位でも頭打ちにする。
+const LOGIN_EMAIL_DAILY_LIMIT = 20;
 
 /**
  * login の失敗文言。「ユーザーが存在しない」場合と「鍵が違う」場合とで
@@ -71,6 +80,62 @@ function rateLimited(): Response {
 }
 
 /**
+ * レート制限のキーに使う識別子へ丸める。
+ *
+ * ⚠️ IPv6 をフルアドレスのまま使ってはいけない。クラウドやVPSでは /64 が
+ * 1契約に払い出されるのが普通で、その中の 2^64 個を使い回されると
+ * IP別の上限が丸ごと無効になる。/64 に丸めれば1契約=1カウンタになる。
+ *
+ * IPv4 はそのまま使う（/32 が個別に割り当てられるため）。
+ */
+function toRateLimitIdentity(ip: string): string {
+  if (!ip.includes(":")) return ip;
+  // IPv6。先頭4グループ（64ビット）だけを使う。
+  // "::" の省略記法があるため、展開せずに素朴に切ると誤るケースがある点に注意
+  return expandIPv6Groups(ip).slice(0, 4).join(":");
+}
+
+/**
+ * IPv6アドレスを8グループの16進文字列配列へ展開する。
+ *
+ * "::" はアドレス中に最大1回だけ現れる「0で埋めた連続グループ」の省略記法。
+ * "::" の前後（head/tail）それぞれのグループ数を数え、8個に足りない分を
+ * "0" で埋めて間に差し込むことで正しく復元する（`split(":")` を素朴に
+ * 先頭4個切るだけだと、"2001:db8::1" のような短縮形で "::" の位置を
+ * 読み違えて誤ったグループに切り分けてしまう）。
+ *
+ * 各グループは 16進数として解釈し直してから文字列化し、大文字・先頭ゼロの
+ * 表記ゆれ（"0DB8" と "db8" など）を吸収する。ゾーンID（"%eth0" など）は
+ * 無視する。IPv4混在表記（"::ffff:192.0.2.1" 等）や壊れた入力は正しく
+ * 展開できないため、安全側に倒して元の文字列をそのまま1グループとして返す
+ * （＝レート制限が過剰にはならず、そのアドレスだけの個別バケツになるだけ）。
+ */
+function expandIPv6Groups(ip: string): string[] {
+  const addr = ip.split("%")[0] ?? ip;
+  if (addr.includes(".")) return [addr]; // IPv4混在表記は非対応、安全側にフォールバック
+
+  const parts = addr.split("::");
+  if (parts.length > 2) return [addr]; // "::" が2回以上 = 壊れた入力
+
+  let groups: string[];
+  if (parts.length === 2) {
+    const head = parts[0] ? parts[0].split(":") : [];
+    const tail = parts[1] ? parts[1].split(":") : [];
+    const missing = 8 - head.length - tail.length;
+    if (missing < 0) return [addr]; // 壊れた入力
+    groups = [...head, ...Array(missing).fill("0"), ...tail];
+  } else {
+    groups = addr.split(":");
+  }
+  if (groups.length !== 8) return [addr]; // 壊れた入力
+
+  return groups.map((g) => {
+    const n = Number.parseInt(g, 16);
+    return Number.isFinite(n) ? n.toString(16) : g;
+  });
+}
+
+/**
  * IP別の日次レート制限を確認し、カウンタを進める。許可なら true。
  *
  * ⚠️ `cf-connecting-ip` が取れない場合は制限をかけない（常に true）。
@@ -85,7 +150,7 @@ export async function checkIpRateLimit(
   limit: number,
 ): Promise<boolean> {
   if (!ip) return true;
-  const key = `rl:${scope}:${todayUtc()}:${await hashForKey(ip)}`;
+  const key = `rl:${scope}:${todayUtc()}:${await hashForKey(toRateLimitIdentity(ip))}`;
   return checkAndBump(env.RATE_LIMIT, key, limit);
 }
 
@@ -148,12 +213,16 @@ async function handleSignup(request: Request, env: AppEnv): Promise<Response> {
   const turnstileOk = await verifyTurnstile(body.turnstileToken, env.TURNSTILE_SECRET_KEY, ip ?? undefined);
   if (!turnstileOk) return turnstileFailure();
 
-  if (!(await checkIpRateLimit(env, ip, "signup", SIGNUP_IP_DAILY_LIMIT))) return rateLimited();
-
+  // 入力検証（純粋なCPU処理。DBにも外部にも触らない）はレート制限より前に置く（M-2）。
+  // 逆にすると、正当な利用者が入力ミスをしただけで10回/日の枠を1つ失ってしまう。
+  // Turnstile の後ろにある限り、無料の入力検証オラクルとして乱打される心配もない。
+  //
   // クライアントの正規化を信用しない。サーバー側で必ず再正規化する
   const email = normalizeEmail(body.email);
   const keyInput = readClientKeyInput(body);
   if (!email || !keyInput) return invalidInput();
+
+  if (!(await checkIpRateLimit(env, ip, "signup", SIGNUP_IP_DAILY_LIMIT))) return rateLimited();
 
   const passwordHash = await hashClientKey(keyInput.key, keyInput.kdfVersion);
   const id = crypto.randomUUID();
@@ -178,6 +247,18 @@ async function handleLogin(request: Request, env: AppEnv): Promise<Response> {
   const email = normalizeEmail(body.email);
   const keyInput = readClientKeyInput(body);
   if (!email || !keyInput) return invalidInput();
+
+  // メールアドレス別の日次上限（I-3）。IP別（LOGIN_IP_DAILY_LIMIT）だけでは、
+  // IPv6の/64が1契約に払い出される環境で同一/64内のアドレスを渡り歩かれると
+  // 特定アカウントへの試行が無制限になる（I-2参照）。
+  //
+  // ⚠️ ユーザーが存在するかどうかを見る前に必ず消費すること。存在確認の後に
+  // 置くと「枠が減ったかどうか」からアカウントの実在が漏れる
+  // （forgot-password の考え方と同じ。上のコメント・reset.ts 参照）。
+  const loginEmailRateLimitKey = `rl:login-email:${todayUtc()}:${await hashForKey(email)}`;
+  if (!(await checkAndBump(env.RATE_LIMIT, loginEmailRateLimitKey, LOGIN_EMAIL_DAILY_LIMIT))) {
+    return rateLimited();
+  }
 
   const user = await findUserByEmail(env.DB, email);
   if (!user) {

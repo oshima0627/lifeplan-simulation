@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppEnv } from "../env";
-import type { KvStore } from "../rateLimit";
+import { hashForKey, todayUtc, type KvStore } from "../rateLimit";
 import { hashToken } from "./session";
-import { handleAuthRoute } from "./routes";
+import { checkIpRateLimit, handleAuthRoute } from "./routes";
 
 // 認証の中核4ハンドラ（signup / login / logout / me）の不変条件を固定する。
 //
@@ -20,6 +20,7 @@ const KDF_VERSION = 1;
 // （変えるときはこちらも一緒に直す）。
 const SIGNUP_IP_DAILY_LIMIT = 10;
 const LOGIN_IP_DAILY_LIMIT = 30;
+const LOGIN_EMAIL_DAILY_LIMIT = 20;
 
 interface FakeUserRow {
   id: string;
@@ -559,15 +560,151 @@ describe("login: IP別レート制限（1日30回まで）", () => {
     const db = new FakeD1();
     const kv = fakeRateLimitKv();
 
+    // メールアドレスは呼び出しごとに変える。IP側の上限（このテストの本題）と、
+    // I-3 で追加したメール別の上限（20回/日）を混同しないため
+    // （同じメールアドレスを32回使うと、IPが無くてもメール側の上限で
+    // 429 になってしまい、このテストが検証したいこと＝IP側の無制限を
+    // 確かめられなくなる。メール別の挙動は別の describe ブロックで検証する）。
     for (let i = 0; i < LOGIN_IP_DAILY_LIMIT + 1; i++) {
       const res = await call(
         req("POST", "https://lifeplan.example.com/api/auth/login", {
-          body: { email: "nobody@example.com", key: KEY, kdfVersion: KDF_VERSION },
+          body: { email: `nobody-noip-${i}@example.com`, key: KEY, kdfVersion: KDF_VERSION },
         }),
         db,
         kv,
       );
       expect(res.status).not.toBe(429);
     }
+  });
+});
+
+describe("login: メールアドレス別レート制限（1日20回まで、I-3）", () => {
+  it("同一メールアドレスへの21回目は 429 / RATE_LIMITED になる（IPは無制限）", async () => {
+    const db = new FakeD1();
+    const kv = fakeRateLimitKv();
+    let last: Response | undefined;
+
+    // IPを付けない（IP側の30回/日には掛からない状態で、メール側の20回/日だけを見る）
+    for (let i = 0; i < LOGIN_EMAIL_DAILY_LIMIT + 1; i++) {
+      last = await call(
+        req("POST", "https://lifeplan.example.com/api/auth/login", {
+          body: { email: "target@example.com", key: KEY, kdfVersion: KDF_VERSION },
+        }),
+        db,
+        kv,
+      );
+    }
+
+    expect(last!.status).toBe(429);
+    expect(await errorCode(last!)).toBe("RATE_LIMITED");
+  });
+
+  it("存在しないユーザーでもメール別の枠は消費される（存在確認より前に消費するため、I-3）", async () => {
+    const db = new FakeD1();
+    const kv = fakeRateLimitKv();
+    const email = "never-registered@example.com";
+
+    await call(
+      req("POST", "https://lifeplan.example.com/api/auth/login", {
+        body: { email, key: KEY, kdfVersion: KDF_VERSION },
+      }),
+      db,
+      kv,
+    );
+
+    const key = `rl:login-email:${todayUtc()}:${await hashForKey(email)}`;
+    expect(await kv.get(key)).toBe("1");
+  });
+
+  it("メールアドレスが違えば互いに枠を消費しない", async () => {
+    const db = new FakeD1();
+    const kv = fakeRateLimitKv();
+
+    for (let i = 0; i < LOGIN_EMAIL_DAILY_LIMIT + 1; i++) {
+      const res = await call(
+        req("POST", "https://lifeplan.example.com/api/auth/login", {
+          body: { email: `distinct-${i}@example.com`, key: KEY, kdfVersion: KDF_VERSION },
+        }),
+        db,
+        kv,
+      );
+      expect(res.status).not.toBe(429);
+    }
+  });
+});
+
+describe("checkIpRateLimit: IPv6 は /64 に丸めてから数える（I-2）", () => {
+  it("同じ/64の異なるアドレスは同じキーとして数えられる", async () => {
+    const kv = fakeRateLimitKv();
+    const env: AppEnv = makeEnv(new FakeD1(), kv);
+
+    const first = await checkIpRateLimit(env, "2001:db8:1:2::1", "test-v6", 2);
+    const second = await checkIpRateLimit(env, "2001:db8:1:2::ffff", "test-v6", 2);
+    const third = await checkIpRateLimit(env, "2001:db8:1:2::2", "test-v6", 2);
+
+    expect(first).toBe(true);
+    expect(second).toBe(true);
+    // 上限2に対し、同じ/64からの3回目は拒否される（同じバケツとして数えられた証拠）
+    expect(third).toBe(false);
+  });
+
+  it("異なる/64は別のキーとして数えられる", async () => {
+    const kv = fakeRateLimitKv();
+    const env: AppEnv = makeEnv(new FakeD1(), kv);
+
+    const a = await checkIpRateLimit(env, "2001:db8:1:2::1", "test-v6-distinct", 1);
+    const b = await checkIpRateLimit(env, "2001:db8:1:3::1", "test-v6-distinct", 1);
+
+    expect(a).toBe(true);
+    // 上限1だが、別の/64なので拒否されない（別バケツとして数えられた証拠）
+    expect(b).toBe(true);
+  });
+
+  it("'::' の省略記法を含む形でも正しく/64が求まる（展開形と同じキーになる）", async () => {
+    const kv = fakeRateLimitKv();
+    const env: AppEnv = makeEnv(new FakeD1(), kv);
+
+    // "2001:db8::1" は先頭64bitが "2001:0db8:0000:0000"。
+    // 展開形（省略なし・先頭ゼロあり）で同じ64bitを表すアドレスと同じバケツになるはず
+    const shorthand = await checkIpRateLimit(env, "2001:db8::1", "test-v6-shorthand", 1);
+    const expanded = await checkIpRateLimit(
+      env,
+      "2001:0db8:0000:0000:9999:9999:9999:9999",
+      "test-v6-shorthand",
+      1,
+    );
+
+    expect(shorthand).toBe(true);
+    // 上限1で、展開形は「同じ/64からの2回目」として拒否されるはず
+    expect(expanded).toBe(false);
+  });
+
+  it("'::' が末尾側や先頭64bitの境界をまたぐ場合でも正しく丸められる", async () => {
+    const kv = fakeRateLimitKv();
+    const env: AppEnv = makeEnv(new FakeD1(), kv);
+
+    // "2001:db8::" の先頭64bitは "2001:0db8:0000:0000"（"::"が境界をまたいで
+    // 前半2グループ・後半0グループを埋める）。同じ64bitを明示的に書いた
+    // アドレスと同じバケツになるはず
+    const boundarySpanning = await checkIpRateLimit(env, "2001:db8::", "test-v6-boundary", 1);
+    const explicit = await checkIpRateLimit(env, "2001:db8:0:0:1:2:3:4", "test-v6-boundary", 1);
+
+    expect(boundarySpanning).toBe(true);
+    expect(explicit).toBe(false);
+  });
+
+  it("IPv4はそのまま（丸めずに）使われる", async () => {
+    const kv = fakeRateLimitKv();
+    const env: AppEnv = makeEnv(new FakeD1(), kv);
+
+    const a = await checkIpRateLimit(env, "203.0.113.10", "test-v4", 1);
+    const b = await checkIpRateLimit(env, "203.0.113.11", "test-v4", 1);
+
+    expect(a).toBe(true);
+    // 異なるIPv4アドレスは丸められず、別バケツのまま
+    expect(b).toBe(true);
+
+    const key = `rl:test-v4:${todayUtc()}:${await hashForKey("203.0.113.10")}`;
+    expect(await kv.get(key)).toBe("1");
   });
 });
