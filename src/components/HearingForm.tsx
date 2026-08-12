@@ -2,9 +2,23 @@
 
 import { DEFAULT_PENSION_START_AGE, LIFE_EXPECTANCY_AGE } from "@/constants/lifeplan";
 import { newRowId } from "@/lib/id";
+import { formatCompactYen } from "@/lib/format";
 import type { Child, HearingSheet, LifeEvent, Occupation } from "@/lib/lifeplan/types";
+import {
+  ASSET_OPTIONS,
+  CHILD_AGE_OPTIONS,
+  CURRENT_AGE_OPTIONS,
+  EVENT_AMOUNT_OPTIONS,
+  INCOME_OPTIONS,
+  intOptions,
+  LIVING_COST_OPTIONS,
+  LUMP_SUM_OPTIONS,
+  PENSION_OPTIONS,
+  PENSION_START_AGE_OPTIONS,
+  RETIREMENT_AGE_OPTIONS,
+} from "@/lib/options";
 import { DerivedSummary } from "./DerivedSummary";
-import { NumberField } from "./NumberField";
+import { SelectField } from "./SelectField";
 
 const OCCUPATION_LABELS: Record<Occupation, string> = {
   employee: "会社員",
@@ -55,15 +69,12 @@ export function HearingForm({
       <section className="flex flex-col gap-4">
         <h2 className="text-base font-bold text-slate-800">基本情報</h2>
 
-        <NumberField
+        <SelectField
           label="現在の年齢"
           value={sheet.currentAge}
+          options={CURRENT_AGE_OPTIONS}
           onChange={(v) => set("currentAge", v)}
           suffix="歳"
-          integer
-          min={18}
-          max={LIFE_EXPECTANCY_AGE - 1}
-          hint="18〜94歳の範囲で入力してください"
         />
 
         <label className="flex flex-col gap-1 text-sm">
@@ -81,39 +92,39 @@ export function HearingForm({
           </select>
         </label>
 
-        <NumberField
+        <SelectField
           label="世帯手取り年収"
           value={sheet.householdNetIncome}
+          options={INCOME_OPTIONS}
           onChange={(v) => set("householdNetIncome", v)}
-          suffix="円"
-          step={100_000}
+          format={formatCompactYen}
           hint="配偶者がいれば合算した額"
         />
 
-        <NumberField
+        <SelectField
           label="年間の基本生活費"
           value={sheet.annualLivingCost}
+          options={LIVING_COST_OPTIONS}
           onChange={(v) => set("annualLivingCost", v)}
-          suffix="円"
-          step={100_000}
-          hint="月30万円なら 3,600,000"
+          format={formatCompactYen}
+          hint="月30万円なら 360万円"
         />
 
-        <NumberField
+        <SelectField
           label="現在の貯金"
           value={sheet.savings}
+          options={ASSET_OPTIONS}
           onChange={(v) => set("savings", v)}
-          suffix="円"
-          step={100_000}
+          format={formatCompactYen}
           hint="利回りがつかない現金"
         />
 
-        <NumberField
+        <SelectField
           label="現在の投資額"
           value={sheet.investments}
+          options={ASSET_OPTIONS}
           onChange={(v) => set("investments", v)}
-          suffix="円"
-          step={100_000}
+          format={formatCompactYen}
           hint="利回りが適用される資産"
         />
 
@@ -130,14 +141,12 @@ export function HearingForm({
               試算されます。現在の年齢以上に修正してください
             </p>
           )}
-          <NumberField
+          <SelectField
             label="リタイア予定年齢"
             value={sheet.retirementAge}
+            options={RETIREMENT_AGE_OPTIONS}
             onChange={(v) => set("retirementAge", v)}
             suffix="歳"
-            integer
-            min={sheet.currentAge}
-            max={LIFE_EXPECTANCY_AGE}
           />
         </div>
 
@@ -152,21 +161,21 @@ export function HearingForm({
           </p>
         </div>
 
-        <NumberField
+        <SelectField
           label="退職金"
           value={sheet.retirementLumpSum ?? 0}
+          options={LUMP_SUM_OPTIONS}
           onChange={(v) => set("retirementLumpSum", v)}
-          suffix="円"
-          step={1_000_000}
+          format={formatCompactYen}
           hint="リタイアした年に一度だけ加算されます"
         />
 
-        <NumberField
+        <SelectField
           label="年金の年額"
           value={sheet.pensionAnnual ?? 0}
+          options={PENSION_OPTIONS}
           onChange={(v) => set("pensionAnnual", v)}
-          suffix="円"
-          step={100_000}
+          format={formatCompactYen}
           hint="ねんきんネットの見込額を入れてください"
         />
 
@@ -182,14 +191,12 @@ export function HearingForm({
               ⚠️ 現在の年齢より前になっています。現在の年齢以上に修正してください
             </p>
           )}
-          <NumberField
+          <SelectField
             label="年金の受給開始年齢"
             value={sheet.pensionStartAge ?? DEFAULT_PENSION_START_AGE}
+            options={PENSION_START_AGE_OPTIONS}
             onChange={(v) => set("pensionStartAge", v)}
             suffix="歳"
-            integer
-            min={sheet.currentAge}
-            max={LIFE_EXPECTANCY_AGE}
           />
         </div>
 
@@ -220,14 +227,12 @@ export function HearingForm({
               className="flex items-end gap-2 rounded border border-slate-200 bg-white p-3"
             >
               <div className="flex-1">
-                <NumberField
+                <SelectField
                   label={`第${i + 1}子の年齢`}
                   value={child.age}
+                  options={CHILD_AGE_OPTIONS}
                   onChange={(v) => setChild(i, { age: v })}
                   suffix="歳"
-                  integer
-                  min={0}
-                  max={22}
                 />
               </div>
               <label className="flex flex-1 flex-col gap-1 text-sm">
@@ -316,23 +321,21 @@ export function HearingForm({
                 </label>
                 <div className="flex items-end gap-2">
                   <div className="flex-1">
-                    <NumberField
+                    <SelectField
                       label="発生する年齢"
                       value={event.age}
+                      options={intOptions(sheet.currentAge, LIFE_EXPECTANCY_AGE)}
                       onChange={(v) => setEvent(i, { age: v })}
                       suffix="歳"
-                      integer
-                      min={sheet.currentAge}
-                      max={LIFE_EXPECTANCY_AGE}
                     />
                   </div>
                   <div className="flex-[2]">
-                    <NumberField
+                    <SelectField
                       label="金額"
                       value={event.amount}
+                      options={EVENT_AMOUNT_OPTIONS}
                       onChange={(v) => setEvent(i, { amount: v })}
-                      suffix="円"
-                      step={1_000_000}
+                      format={formatCompactYen}
                     />
                   </div>
                   <button

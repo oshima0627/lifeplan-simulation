@@ -26,7 +26,7 @@ describe("Simulator の保存・復元・リセット", () => {
     render(<Simulator />);
 
     const input = await screen.findByLabelText(/^現在の年齢/);
-    expect(input).toHaveValue(DEFAULT_SHEET.currentAge);
+    expect(input).toHaveValue(String(DEFAULT_SHEET.currentAge));
   });
 
   it("localStorageに保存済みのシートがあれば、マウント後にそれを復元してフォームに反映する", async () => {
@@ -40,7 +40,7 @@ describe("Simulator の保存・復元・リセット", () => {
     render(<Simulator />);
 
     const input = await screen.findByLabelText(/^現在の年齢/);
-    expect(input).toHaveValue(52);
+    expect(input).toHaveValue("52");
   });
 
   it("入力を変更するとlocalStorageに保存される", async () => {
@@ -48,7 +48,7 @@ describe("Simulator の保存・復元・リセット", () => {
     const input = await screen.findByLabelText(/^現在の年齢/);
 
     fireEvent.change(input, { target: { value: "50" } });
-    expect(input).toHaveValue(50);
+    expect(input).toHaveValue("50");
 
     const persisted = loadSheet();
     expect(persisted?.currentAge).toBe(50);
@@ -61,11 +61,11 @@ describe("Simulator の保存・復元・リセット", () => {
     render(<Simulator />);
     const input = await screen.findByLabelText(/^現在の年齢/);
     // 復元されていることを先に確認してから、リセットの効果を見る
-    expect(input).toHaveValue(60);
+    expect(input).toHaveValue("60");
 
     fireEvent.click(screen.getByText("入力内容を消して初期値に戻す"));
 
-    expect(input).toHaveValue(DEFAULT_SHEET.currentAge);
+    expect(input).toHaveValue(String(DEFAULT_SHEET.currentAge));
     const persisted = loadSheet();
     expect(persisted?.currentAge).toBe(DEFAULT_SHEET.currentAge);
   });
