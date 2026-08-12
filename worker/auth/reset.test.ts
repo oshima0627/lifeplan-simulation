@@ -725,9 +725,9 @@ describe("reset-token: パスワード再設定画面のためのメールアド
     const res = await call(req("GET", `${RESET_TOKEN_URL}?token=${token}`), db);
 
     expect(res.status).toBe(400);
-    expect(await errorCode(res)).toBe("RESET_TOKEN_INVALID");
     const text = await res.text();
     expect(text).not.toContain("exists@example.com");
+    expect(JSON.parse(text).error.code).toBe("RESET_TOKEN_INVALID");
   });
 
   it("使用済みのトークンは 400 RESET_TOKEN_INVALID", async () => {
@@ -850,14 +850,16 @@ describe("ディスパッチ: 未知のパス・メソッド", () => {
 });
 
 describe("全応答に cache-control: no-store が付く", () => {
-  it("forgot-password と reset-password のいずれも no-store", async () => {
+  it("forgot-password と reset-password と reset-token のいずれも no-store", async () => {
     const db = new FakeD1();
     const forgot = await call(req("POST", FORGOT_URL, { body: { email: "cache@example.com" } }), db);
     const reset = await call(
       req("POST", RESET_URL, { body: { token: "x", key: KEY, kdfVersion: KDF_VERSION } }),
       db,
     );
+    const resetToken = await call(req("GET", `${RESET_TOKEN_URL}?token=x`), db);
     expect(forgot.headers.get("cache-control")).toBe("no-store");
     expect(reset.headers.get("cache-control")).toBe("no-store");
+    expect(resetToken.headers.get("cache-control")).toBe("no-store");
   });
 });
