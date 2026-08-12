@@ -642,6 +642,40 @@ Worker を通るため、静的アセットの配信までWorkerの実行回数�
 出典: <https://developers.cloudflare.com/workers/static-assets/routing/worker-script/>
 および同 `/static-site-generation/`
 
+**検証結果（2026-08-12・本番）:** `run_worker_first: ["/api/*"]` を設定した状態で、
+以下の**3経路すべて**から `/api/health` が Worker に到達することを確認した。
+
+| 経路 | 結果 |
+|---|---|
+| `curl`（非ナビゲーション） | `200` `{"ok":true}` `cache-control: no-store` |
+| `Sec-Fetch-Mode: navigate` ＋ `Accept: text/html` を付けた `curl` | `200` `{"ok":true}` |
+| **実ブラウザのアドレスバーに直接入力** | `{"ok":true}` |
+
+**`curl` だけの確認では不十分。** curl は `Sec-Fetch-*` を送らないため
+ナビゲーションリクエストとして分類されず、**設定を落としても通ってしまう。**
+この設定を変更したときは、必ずナビゲーション経路も確かめること。
+
+存在しない `/api/nope` が `404.html`（HTML）ではなく JSON のエラー本文を返すことも
+本番で確認済み。これも Worker に到達している証拠になる。
+
+### 10.2 worker/ の tsconfig は分離する（2026-08-12 実装時に判明）
+
+**`@cloudflare/workers-types` を root の `tsconfig.json` の `compilerOptions.types` に
+足してはいけない。** アンビエント型が `lib: ["dom"]` の型と衝突し、
+`src/` 配下の既存コードが型エラーになる（`HTMLElement` → `HTMLSelectElement` の
+キャストが通らなくなる）。`"node"` などを足しても解消しない。
+
+**対処: `worker/tsconfig.json` を分ける。**
+
+- `worker/tsconfig.json` … `lib` から `dom` を外し、`types: ["@cloudflare/workers-types"]`
+- root の `tsconfig.json` … `exclude` に `"worker"` を追加
+- `package.json` … `"typecheck": "tsc --noEmit && tsc --noEmit -p worker/tsconfig.json"`
+
+⚠️ **`typecheck` を2構成とも走らせること。** root から除外しただけだと
+`worker/` が一切検査されず、**「検査しているつもりで検査していない」**状態になる。
+`worker/tsconfig.json` の `exclude` を明示的に上書きするのも必要
+（親の `exclude: ["node_modules", "worker"]` を継承すると自分自身を除外してしまう）。
+
 OpenNext は使わない。Windows を正式サポートしておらず（WSLかCIが必要）、
 開発環境が Windows のため。**静的エクスポート＋Worker 1本の構成を維持する。**
 
