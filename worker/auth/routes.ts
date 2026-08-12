@@ -12,17 +12,32 @@ import { hashClientKey, readClientKeyInput, verifyClientKey } from "./password";
 import { hashToken, newSessionToken, sessionExpiryIso, SESSION_TTL_DAYS } from "./session";
 
 /**
- * 登録済みかどうかを応答から判別できないようにするための、単一の失敗文言。
+ * login の失敗文言。「ユーザーが存在しない」場合と「鍵が違う」場合とで
+ * 文言・ステータスを変えない（この2ケースの区別がつくと、既存アカウントの
+ * メールアドレスをログイン画面から列挙できてしまう）。
  *
- * 「同じメールで再登録」「間違った鍵でログイン」「存在しないメールでログイン」の
- * 3ケースすべてでこれを返す。文言・ステータスを分けると、攻撃者がその差分だけで
- * 「このメールは登録済みだ」と判別できてしまう（アカウント列挙）。
+ * ⚠️ signup の重複メールはこれとは**別扱い**（EMAIL_TAKEN、下記）。
+ * signup 中の利用者は「登録しようとしている」のであってパスワードを
+ * 間違えたわけではないため、ここに合流させると次に進む手段が無くなる
+ * （ログインすべきかも分からない）。signup 重複だけを専用文言にすると
+ * 「このメールは登録済みか」を試せる窓口にはなるが、そのトレードオフは
+ * 正当な利用者のUX破綻より小さいと判断し許容する（列挙対策は文言統一では
+ * なくレート制限 — A-3 で Turnstile とともに導入）。
  */
 const AUTH_FAILURE_MESSAGE = "メールアドレスまたはパスワードが違います";
 const AUTH_FAILURE_STATUS = 401;
 
 function authFailure(): Response {
   return errorResponse("AUTH_FAILED", AUTH_FAILURE_MESSAGE, AUTH_FAILURE_STATUS);
+}
+
+/** signup でメールが重複したときだけの専用応答。login の失敗とは文言・ステータスを分ける。 */
+function emailTaken(): Response {
+  return errorResponse(
+    "EMAIL_TAKEN",
+    "このメールアドレスはすでに登録されています。ログインをお試しください。",
+    409,
+  );
 }
 
 function invalidInput(): Response {
@@ -81,8 +96,8 @@ async function handleSignup(request: Request, env: AppEnv): Promise<Response> {
 
   const created = await createUser(env.DB, { id, email, passwordHash });
   if (!created) {
-    // メール重複。存在を明かさない — login失敗と同一の応答にする
-    return authFailure();
+    // メール重複。専用の文言・ステータスで案内する（login失敗とは分ける）
+    return emailTaken();
   }
 
   const token = await issueSession(env, id);
