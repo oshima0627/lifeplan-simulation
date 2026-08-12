@@ -3,6 +3,11 @@
 import { DEFAULT_PENSION_START_AGE, LIFE_EXPECTANCY_AGE } from "@/constants/lifeplan";
 import { newRowId } from "@/lib/id";
 import { formatCompactYen } from "@/lib/format";
+import {
+  isEventAgeOutOfRange,
+  isPensionStartAgeInvalid,
+  isRetirementAgeInvalid,
+} from "@/lib/lifeplan/guards";
 import type { Child, HearingSheet, LifeEvent, Occupation } from "@/lib/lifeplan/types";
 import {
   ASSET_OPTIONS,
@@ -50,9 +55,8 @@ export function HearingForm({
   // のではなく、cashflow.ts の `age < retirementAge` 判定が全期間 false になり、
   // 給与収入が黙って0円として試算され続けてしまう。年金受給開始年齢も同様に
   // 「現在の年齢より前」を許すと入力の意図と食い違うため、ここで検知して見せる
-  const isRetirementAgeInvalid = sheet.retirementAge < sheet.currentAge;
-  const effectivePensionStartAge = sheet.pensionStartAge ?? DEFAULT_PENSION_START_AGE;
-  const isPensionStartAgeInvalid = effectivePensionStartAge < sheet.currentAge;
+  const retirementAgeInvalid = isRetirementAgeInvalid(sheet);
+  const pensionStartAgeInvalid = isPensionStartAgeInvalid(sheet);
 
   const setChild = (index: number, patch: Partial<Child>) => {
     const next = children.map((c, i) => (i === index ? { ...c, ...patch } : c));
@@ -130,12 +134,12 @@ export function HearingForm({
 
         <div
           className={
-            isRetirementAgeInvalid
+            retirementAgeInvalid
               ? "flex flex-col gap-2 rounded border border-amber-400 bg-amber-50 p-3"
               : undefined
           }
         >
-          {isRetirementAgeInvalid && (
+          {retirementAgeInvalid && (
             <p className="text-xs font-medium text-amber-700">
               ⚠️ 現在の年齢より前になっています。この状態では給与収入が全期間0円として
               試算されます。現在の年齢以上に修正してください
@@ -181,12 +185,12 @@ export function HearingForm({
 
         <div
           className={
-            isPensionStartAgeInvalid
+            pensionStartAgeInvalid
               ? "flex flex-col gap-2 rounded border border-amber-400 bg-amber-50 p-3"
               : undefined
           }
         >
-          {isPensionStartAgeInvalid && (
+          {pensionStartAgeInvalid && (
             <p className="text-xs font-medium text-amber-700">
               ⚠️ 現在の年齢より前になっています。現在の年齢以上に修正してください
             </p>
@@ -297,7 +301,7 @@ export function HearingForm({
             // 現在の年齢をあとから引き上げると、すでに登録済みのイベントが
             // 試算範囲外になることがある。その場合は計算エンジンが黙って無視するので、
             // ここで検知してユーザーに見えるようにする
-            const isOutOfRange = event.age < sheet.currentAge || event.age > LIFE_EXPECTANCY_AGE;
+            const isOutOfRange = isEventAgeOutOfRange(event, sheet.currentAge);
             return (
               <div
                 key={event.id}

@@ -118,4 +118,17 @@ describe("初回訪問のモーダル", () => {
     fireEvent.click(await screen.findByText("入力をやり直す"));
     expect(screen.getByRole("dialog")).toBeInTheDocument();
   });
+
+  it("既定値のまま1項目も変えずにモーダルを閉じても保存される（Finding M-3）", async () => {
+    localStorage.clear();
+    render(<Simulator />);
+    const dialog = await screen.findByRole("dialog");
+    expect(dialog).toBeInTheDocument();
+    expect(loadSheet()).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "閉じる" }));
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(loadSheet()).not.toBeNull();
+  });
 });

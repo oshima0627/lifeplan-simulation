@@ -1,9 +1,14 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { DEFAULT_PENSION_START_AGE, LIFE_EXPECTANCY_AGE } from "@/constants/lifeplan";
 import { formatCompactYen } from "@/lib/format";
 import { newRowId } from "@/lib/id";
+import {
+  isEventAgeOutOfRange,
+  isPensionStartAgeInvalid,
+  isRetirementAgeInvalid,
+} from "@/lib/lifeplan/guards";
 import type { Child, HearingSheet, LifeEvent, Occupation } from "@/lib/lifeplan/types";
 import {
   ASSET_OPTIONS,
@@ -62,12 +67,19 @@ export function HearingModal({
   onClose: () => void;
 }) {
   const [step, setStep] = useState(0);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
 
   // 開き直したときは最初から始める。前回の途中位置を覚えていると、
   // 「入力をやり直す」を押したのに5ステップ目が出る、という挙動になる
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     if (open) setStep(0);
+  }, [open]);
+
+  // 開いたときにモーダル内の最初の操作要素（✕ボタン）へフォーカスを移す。
+  // 完全なフォーカストラップは今回のスコープ外（最終レビュー指摘 C2）
+  useEffect(() => {
+    if (open) closeButtonRef.current?.focus();
   }, [open]);
 
   // Escape で閉じる。モーダルの慣習であり、これが無いと閉じ方が
@@ -108,10 +120,23 @@ export function HearingModal({
         aria-label={STEP_TITLES[step]}
         className="flex max-h-[90vh] w-full max-w-lg flex-col overflow-y-auto rounded-lg bg-white p-6 shadow-xl"
       >
-        <p className="text-xs text-slate-500">
-          ステップ {step + 1} / {STEP_TITLES.length}
-        </p>
-        <h2 className="mt-1 text-lg font-bold text-slate-900">{STEP_TITLES[step]}</h2>
+        <div className="flex items-start justify-between gap-2">
+          <div>
+            <p className="text-xs text-slate-500">
+              ステップ {step + 1} / {STEP_TITLES.length}
+            </p>
+            <h2 className="mt-1 text-lg font-bold text-slate-900">{STEP_TITLES[step]}</h2>
+          </div>
+          <button
+            ref={closeButtonRef}
+            type="button"
+            aria-label="閉じる"
+            className="shrink-0 rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+            onClick={onClose}
+          >
+            ✕
+          </button>
+        </div>
 
         <div className="mt-5 flex flex-col gap-4">
           {step === 0 && (
@@ -137,14 +162,28 @@ export function HearingModal({
                   ))}
                 </select>
               </label>
-              <SelectField
-                label="リタイア予定年齢"
-                value={sheet.retirementAge}
-                options={RETIREMENT_AGE_OPTIONS}
-                onChange={(v) => set("retirementAge", v)}
-                suffix="歳"
-                hint="働くのをやめる予定の年齢。決めていなければ65歳のままで構いません"
-              />
+              <div
+                className={
+                  isRetirementAgeInvalid(sheet)
+                    ? "flex flex-col gap-2 rounded border border-amber-400 bg-amber-50 p-3"
+                    : undefined
+                }
+              >
+                {isRetirementAgeInvalid(sheet) && (
+                  <p className="text-xs font-medium text-amber-700">
+                    ⚠️ 現在の年齢より前になっています。この状態では給与収入が全期間0円として
+                    試算されます。現在の年齢以上に修正してください
+                  </p>
+                )}
+                <SelectField
+                  label="リタイア予定年齢"
+                  value={sheet.retirementAge}
+                  options={RETIREMENT_AGE_OPTIONS}
+                  onChange={(v) => set("retirementAge", v)}
+                  suffix="歳"
+                  hint="働くのをやめる予定の年齢。決めていなければ65歳のままで構いません"
+                />
+              </div>
             </>
           )}
 
@@ -262,14 +301,27 @@ export function HearingModal({
                 format={formatCompactYen}
                 hint="「ねんきんネット」で見込額を確認できます。0円のままだと年金が一切ない前提で試算されます"
               />
-              <SelectField
-                label="年金の受給開始年齢"
-                value={sheet.pensionStartAge ?? DEFAULT_PENSION_START_AGE}
-                options={PENSION_START_AGE_OPTIONS}
-                onChange={(v) => set("pensionStartAge", v)}
-                suffix="歳"
-                hint="上の金額は65歳から受け取る場合の額として扱います"
-              />
+              <div
+                className={
+                  isPensionStartAgeInvalid(sheet)
+                    ? "flex flex-col gap-2 rounded border border-amber-400 bg-amber-50 p-3"
+                    : undefined
+                }
+              >
+                {isPensionStartAgeInvalid(sheet) && (
+                  <p className="text-xs font-medium text-amber-700">
+                    ⚠️ 現在の年齢より前になっています。現在の年齢以上に修正してください
+                  </p>
+                )}
+                <SelectField
+                  label="年金の受給開始年齢"
+                  value={sheet.pensionStartAge ?? DEFAULT_PENSION_START_AGE}
+                  options={PENSION_START_AGE_OPTIONS}
+                  onChange={(v) => set("pensionStartAge", v)}
+                  suffix="歳"
+                  hint="上の金額は65歳から受け取る場合の額として扱います"
+                />
+              </div>
             </>
           )}
 
@@ -279,8 +331,20 @@ export function HearingModal({
                 住宅購入・車の買い替え・リフォームなど、特定の年にまとまって出ていくお金を登録できます。
                 予定がなければスキップしてください。
               </p>
-              {events.map((event, i) => (
-                <div key={event.id} className="flex flex-col gap-2 rounded border border-slate-200 p-3">
+              {events.map((event, i) => {
+                const outOfRange = isEventAgeOutOfRange(event, sheet.currentAge);
+                return (
+                <div
+                  key={event.id}
+                  className={`flex flex-col gap-2 rounded border p-3 ${
+                    outOfRange ? "border-amber-400 bg-amber-50" : "border-slate-200"
+                  }`}
+                >
+                  {outOfRange && (
+                    <p className="text-xs font-medium text-amber-700">
+                      ⚠️ 現在の年齢〜95歳の範囲外のため、この項目は試算に反映されていません
+                    </p>
+                  )}
                   <label className="flex flex-col gap-1 text-sm">
                     <span className="font-medium text-slate-700">内容</span>
                     <input
@@ -313,7 +377,8 @@ export function HearingModal({
                     削除
                   </button>
                 </div>
-              ))}
+                );
+              })}
               <button
                 type="button"
                 aria-label="大きな支出の予定を追加"

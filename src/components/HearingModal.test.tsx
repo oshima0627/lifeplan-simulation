@@ -105,4 +105,53 @@ describe("HearingModal", () => {
     rerender(<HearingModal sheet={BASE} onChange={() => {}} open onClose={() => {}} />);
     expect(screen.getByRole("dialog")).toHaveAccessibleName("あなたのこと");
   });
+
+  it("「閉じる」ボタンをクリックすると onClose が呼ばれる（Finding C2）", () => {
+    const onClose = vi.fn();
+    render(<HearingModal sheet={BASE} onChange={() => {}} open onClose={onClose} />);
+    fireEvent.click(screen.getByRole("button", { name: "閉じる" }));
+    expect(onClose).toHaveBeenCalled();
+  });
+});
+
+describe("黙って間違う条件の警告（Finding C1）", () => {
+  it("Step 0: リタイア年齢が現在年齢を下回ると警告が出る", () => {
+    const sheet: HearingSheet = { ...BASE, currentAge: 66, retirementAge: 65 };
+    render(<HearingModal sheet={sheet} onChange={() => {}} open onClose={() => {}} />);
+    expect(screen.getByRole("dialog")).toHaveAccessibleName("あなたのこと");
+    expect(screen.getByText(/給与収入が全期間0円として/)).toBeInTheDocument();
+  });
+
+  it("Step 4: 年金受給開始年齢が現在年齢を下回ると警告が出る", () => {
+    // retirementAge も妥当な値にしておく。BASE.retirementAge(65) のままだと
+    // currentAge(70) がそれを上回り、リタイア側の警告文言（「現在の年齢より前に
+    // なっています」）と重複して getByText が複数一致で例外を投げる
+    const sheet: HearingSheet = {
+      ...BASE,
+      currentAge: 70,
+      retirementAge: 70,
+      pensionStartAge: 65,
+    };
+    render(<HearingModal sheet={sheet} onChange={() => {}} open onClose={() => {}} />);
+    fireEvent.click(screen.getByRole("button", { name: "次へ" }));
+    fireEvent.click(screen.getByRole("button", { name: "次へ" }));
+    fireEvent.click(screen.getByRole("button", { name: "次へ" }));
+    fireEvent.click(screen.getByRole("button", { name: "次へ" }));
+    expect(screen.getByRole("dialog")).toHaveAccessibleName("老後");
+    expect(screen.getByText(/現在の年齢より前になっています/)).toBeInTheDocument();
+  });
+
+  it("Step 5: 試算範囲外のイベントに警告が出る", () => {
+    const sheet: HearingSheet = {
+      ...BASE,
+      currentAge: 40,
+      customEvents: [{ id: "e1", age: 30, amount: 1_000_000, label: "住宅購入" }],
+    };
+    render(<HearingModal sheet={sheet} onChange={() => {}} open onClose={() => {}} />);
+    for (let i = 0; i < 5; i++) {
+      fireEvent.click(screen.getByRole("button", { name: "次へ" }));
+    }
+    expect(screen.getByRole("dialog")).toHaveAccessibleName("大きな支出");
+    expect(screen.getByText(/試算に反映されていません/)).toBeInTheDocument();
+  });
 });

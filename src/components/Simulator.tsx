@@ -63,7 +63,14 @@ export function Simulator() {
         sheet={sheet}
         onChange={setSheet}
         open={modalOpen}
-        onClose={() => setModalOpen(false)}
+        onClose={() => {
+          // モーダルを閉じた時点で明示的に保存する。既定値のまま1項目も
+          // 変えずに完走した場合、sheet が一度も変化せず保存エフェクトが
+          // 発火しないため、これが無いと再読み込みでモーダルが再び開いてしまう
+          // （最終レビュー指摘 M-3）
+          saveSheet(sheet);
+          setModalOpen(false);
+        }}
       />
       <div className="grid gap-6 lg:grid-cols-[minmax(320px,380px)_1fr]">
         {/*
