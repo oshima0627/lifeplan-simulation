@@ -1,4 +1,9 @@
-import type { EducationPath, EducationStage, ScenarioAssumption } from "@/lib/lifeplan/types";
+import type {
+  EducationPath,
+  EducationStage,
+  ScenarioAssumption,
+  ScenarioKey,
+} from "@/lib/lifeplan/types";
 
 /**
  * 試算の終了年齢。
@@ -10,16 +15,56 @@ export const LIFE_EXPECTANCY_AGE = 95;
 export const DEFAULT_PENSION_START_AGE = 65;
 
 /**
- * 3シナリオの前提値（docs/requirements.md §5.2, §5.1.1）。
+ * シナリオの前提を**実質（今日の購買力ベース）**で持つ
+ * （docs/superpowers/specs/2026-08-12-paid-ai-advisor-design.md §4.6.3）。
+ *
+ * なぜ実質で持つか: 名目で持つと「昇給0%・インフレ3%」のような書き方になり、
+ * それが「実質賃金が毎年2.9%下がり続ける」を意味することが読み取れない。
+ * 実際、変更前の悲観シナリオはリタイアまでに実質収入が3分の1になる想定で、
+ * **誰が試算しても破綻する＝シナリオとして情報を持たない**状態だった。
+ */
+export interface RealScenarioAssumption {
+  key: ScenarioKey;
+  label: string;
+  /** 投資の実質利回り（年率%）。全世界株式の長期実績は実質5%前後 */
+  realReturnPct: number;
+  /** 実質昇給率（年率%）。マイナスは実質賃金の下落 */
+  realRaisePct: number;
+  /** インフレ率（年率%）。**退職金の目減りに引き続き必要**（§5.1.1 で名目固定のため） */
+  inflationPct: number;
+  /** 年金のマクロ経済スライド幅（%ポイント）。従来どおり */
+  pensionSlidePct: number;
+}
+
+export const REAL_SCENARIOS: readonly RealScenarioAssumption[] = [
+  { key: "optimistic", label: "楽観", realReturnPct: 5, realRaisePct: 1, inflationPct: 1, pensionSlidePct: 0 },
+  { key: "baseline", label: "普通", realReturnPct: 3, realRaisePct: 0, inflationPct: 2, pensionSlidePct: 0.5 },
+  { key: "pessimistic", label: "悲観", realReturnPct: 1, realRaisePct: -1, inflationPct: 3, pensionSlidePct: 1.0 },
+];
+
+/** 実質率とインフレ率から名目率を求める。(1+実質)×(1+インフレ)-1 */
+function toNominalPct(realPct: number, inflationPct: number): number {
+  return ((1 + realPct / 100) * (1 + inflationPct / 100) - 1) * 100;
+}
+
+/**
+ * 計算エンジンに渡す名目ベースの前提（docs/requirements.md §5.2, §5.1.1）。
  * 利回り・昇給率・インフレ率に加えて、年金のスライド幅もシナリオごとに連動させる。
  * 悲観シナリオでは年金の目減りリスクも織り込む。
- * 悲観シナリオでも破綻しないなら、その計画は強いと判定できる
+ * 悲観シナリオでも破綻しないなら、その計画は強いと判定できる。
+ *
+ * **エンジン（src/lib/lifeplan/cashflow.ts）の計算仕様は変えない。**
+ * 名目で計算し、表示の直前に src/lib/lifeplan/realTerms.ts で実質へ戻す。
+ * この2段構えにより、163テストが守っている計算仕様に触れずに表示単位を変えられる
  */
-export const SCENARIOS: readonly ScenarioAssumption[] = [
-  { key: "optimistic", label: "楽観", returnPct: 5, raisePct: 2, inflationPct: 1, pensionSlidePct: 0 },
-  { key: "baseline", label: "普通", returnPct: 3.5, raisePct: 1, inflationPct: 2, pensionSlidePct: 0.5 },
-  { key: "pessimistic", label: "悲観", returnPct: 2, raisePct: 0, inflationPct: 3, pensionSlidePct: 1.0 },
-];
+export const SCENARIOS: readonly ScenarioAssumption[] = REAL_SCENARIOS.map((s) => ({
+  key: s.key,
+  label: s.label,
+  returnPct: toNominalPct(s.realReturnPct, s.inflationPct),
+  raisePct: toNominalPct(s.realRaisePct, s.inflationPct),
+  inflationPct: s.inflationPct,
+  pensionSlidePct: s.pensionSlidePct,
+}));
 
 /** 進学段階の定義。子供の年齢 startAge〜endAge（両端を含む）がその段階にあたる */
 export const EDUCATION_STAGES: readonly {
