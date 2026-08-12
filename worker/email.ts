@@ -35,15 +35,21 @@ export async function sendPasswordResetMail({
   appUrl,
   fetchImpl = fetch,
 }: SendPasswordResetMailInput): Promise<void> {
-  const link = `${appUrl}/reset-password?token=${encodeURIComponent(token)}`;
+  // 末尾スラッシュを落としてから結合する。
+  // pre-meet では appUrl() 側で正規化していたが、本プロジェクトは引数で
+  // 受け取る形にしたため、その保証がここに無いと "//reset-password" になる
+  const base = appUrl.replace(/\/$/, "");
+  const link = `${base}/reset-password?token=${encodeURIComponent(token)}`;
   const text = [
-    "パスワード再設定をリクエストされました。",
+    "ライフプランシミュレーターのパスワード再設定をリクエストされました。",
     "",
     "以下のリンクを開いて新しいパスワードを設定してください。",
     link,
     "",
     `このリンクは ${expiresInMinutes} 分で無効になり、1回だけ使えます。`,
     "",
+    // TODO(A-3 Task 5): 再設定で全セッションを消す実装が入ったら、
+    // 「再設定すると、ログイン中のすべての端末からログアウトされます」の一文を本文に戻す
     "このメールに心当たりがない場合は、何もせず破棄してください。",
     "パスワードは変更されません。",
   ].join("\n");
@@ -59,7 +65,7 @@ export async function sendPasswordResetMail({
     body: JSON.stringify({
       from,
       to,
-      subject: "パスワード再設定のご案内",
+      subject: "【ライフプランシミュレーター】パスワード再設定のご案内",
       text,
     }),
   });

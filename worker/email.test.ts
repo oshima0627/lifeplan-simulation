@@ -57,6 +57,30 @@ describe("sendPasswordResetMail", () => {
     expect(body.text).not.toContain("reset-password?token=abc def+ghi");
   });
 
+  it("appUrl に末尾スラッシュが付いていても // にならない", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(jsonResponse({ id: "1" }));
+    await sendPasswordResetMail({
+      ...baseInput,
+      appUrl: "https://example.com/",
+      fetchImpl,
+    });
+
+    const [, init] = fetchImpl.mock.calls[0];
+    const body = JSON.parse(init.body as string);
+    const expectedLink = `https://example.com/reset-password?token=${encodeURIComponent(baseInput.token)}`;
+    expect(body.text).toContain(expectedLink);
+    expect(body.text).not.toContain("//reset-password");
+  });
+
+  it("件名にサービス名（ライフプランシミュレーター）が含まれる", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(jsonResponse({ id: "1" }));
+    await sendPasswordResetMail({ ...baseInput, fetchImpl });
+
+    const [, init] = fetchImpl.mock.calls[0];
+    const body = JSON.parse(init.body as string);
+    expect(body.subject).toContain("ライフプランシミュレーター");
+  });
+
   it("本文に有効期限（分）が入る", async () => {
     const fetchImpl = vi.fn().mockResolvedValue(jsonResponse({ id: "1" }));
     await sendPasswordResetMail({ ...baseInput, fetchImpl });
