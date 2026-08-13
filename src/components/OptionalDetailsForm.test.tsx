@@ -100,7 +100,9 @@ describe("OptionalDetailsForm の行操作", () => {
 
 describe("黙って間違う条件の警告", () => {
   it("年金受給開始年齢が現在年齢を下回ると警告が出る", () => {
-    const sheet: HearingSheet = { ...BASE, currentAge: 70, retirementAge: 70, pensionStartAge: 65 };
+    // retirementAge はここでは検証しない（リタイア年齢の警告は BasicInfoBar に
+    // 一本化済みで、このコンポーネントは表示しない）。BASE の65のままでよい
+    const sheet: HearingSheet = { ...BASE, currentAge: 70, pensionStartAge: 65 };
     render(<OptionalDetailsForm sheet={sheet} onChange={() => {}} />);
     expect(screen.getByText(/現在の年齢より前になっています/)).toBeInTheDocument();
   });

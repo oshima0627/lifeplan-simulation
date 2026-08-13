@@ -1,4 +1,4 @@
-import type { LifeplanResult } from "./types";
+import type { LifeplanResult, ScenarioResult } from "./types";
 
 /**
  * 判定の見出し。
@@ -17,4 +17,23 @@ export function verdictHeadline(result: LifeplanResult): string {
   return anyDepletes
     ? "資産が尽きるシナリオがあります"
     : "尽きはしませんが、一時的に資金不足になるシナリオがあります";
+}
+
+/**
+ * 1シナリオの結末を短い文言にする。
+ *
+ * verdictHeadline と同じ理由でここに集約する。集約する前は VerdictSummary
+ * （固定領域）と DepletionVerdict（スクロール領域）が同じ分岐をそれぞれ
+ * コピーしており、「一時的に不足」「一時的に資金不足」に文言が割れていた
+ * （最終レビュー指摘 F3）。文言は「一時的に資金不足」に統一する——こちらが
+ * この変更より前から本番で使われていた表現で、変えると既存のテストや
+ * 利用者の記憶に不要な影響が出る。
+ *
+ * 色は用途（バッジ／カード）によって呼び出し側で変わるため、ここでは
+ * 文字列だけを返し、色は呼び出し側が持つ
+ */
+export function scenarioOutcome(scenario: ScenarioResult): string {
+  if (scenario.depletionAge !== null) return `${scenario.depletionAge}歳で尽きる`;
+  if (scenario.temporaryShortfall) return "一時的に資金不足";
+  return "尽きない";
 }

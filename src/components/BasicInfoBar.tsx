@@ -153,24 +153,37 @@ export function BasicInfoBar({
         />
       </div>
 
-      {(retirementInvalid || pensionInvalid) && (
-        // ⚠️ role="alert" は使わない。値を変えるたびに読み上げが割り込む。
-        // 助言は role="status"。role="banner" はサイトヘッダのランドマークなので論外
-        <div
-          role="status"
-          className="rounded border border-amber-400 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800"
-        >
-          {retirementInvalid && (
-            <p>
-              ⚠️ リタイア予定年齢が現在の年齢より前になっています。この状態では
-              給与収入が全期間0円として試算されます
-            </p>
-          )}
-          {pensionInvalid && (
-            <p>⚠️ 年金の受給開始年齢が現在の年齢より前になっています</p>
-          )}
-        </div>
-      )}
+      {/*
+        ⚠️ role="alert" は使わない。値を変えるたびに読み上げが割り込む。
+        助言は role="status"。role="banner" はサイトヘッダのランドマークなので論外
+
+        ⚠️ role="status" の要素自体は警告の有無に関わらず常に描画し、中身だけを
+        出し入れする（最終レビュー指摘 F4）。要素ごと出し入れすると、ライブ
+        リージョンが中身と同時にDOMへ挿入されることになり、スクリーンリーダーの
+        実装によっては読み上げが発火しないことがある。警告が無いときに枠線や
+        余白が目に見えないよう、装飾のクラスは中身がある場合にだけ付ける
+      */}
+      <div
+        role="status"
+        className={
+          retirementInvalid || pensionInvalid
+            ? "rounded border border-amber-400 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800"
+            : undefined
+        }
+      >
+        {retirementInvalid && (
+          <p>
+            ⚠️ リタイア予定年齢が現在の年齢より前になっています。この状態では
+            給与収入が全期間0円として試算されます
+          </p>
+        )}
+        {pensionInvalid && (
+          // フォーム側（OptionalDetailsForm）の同じ警告と完全に同一の文言にはしていない。
+          // バー側は項目がスクロール領域にあるため項目名を含める必要があるが、
+          // フォーム側は項目のすぐ隣に出るので項目名を繰り返す必要がない（最終レビュー指摘 F5）
+          <p>⚠️ 年金の受給開始年齢が現在の年齢より前になっています。現在の年齢以上に修正してください</p>
+        )}
+      </div>
     </div>
   );
 }

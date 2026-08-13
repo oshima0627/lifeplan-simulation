@@ -2,7 +2,7 @@
 
 import { formatCompactYen } from "@/lib/format";
 import type { HearingSheet, LifeplanResult } from "@/lib/lifeplan/types";
-import { verdictHeadline } from "@/lib/lifeplan/verdict";
+import { scenarioOutcome, verdictHeadline } from "@/lib/lifeplan/verdict";
 
 /**
  * 「資産が尽きる年」の判定（docs/requirements.md §5.3）。
@@ -70,13 +70,21 @@ export function DepletionVerdict({
           <div key={s.key} className="rounded border border-slate-200 bg-white p-3">
             <div className="text-xs font-medium text-slate-500">{s.label}</div>
             <div className="mt-1 text-sm font-bold text-slate-900">
-              {s.depletionAge !== null ? (
-                <span className="text-red-700">{s.depletionAge}歳で尽きる</span>
-              ) : s.temporaryShortfall ? (
-                <span className="text-amber-700">一時的に資金不足</span>
-              ) : (
-                <span className="text-emerald-700">尽きない</span>
-              )}
+              {/*
+                文言（「◯歳で尽きる」等）は scenarioOutcome に集約済み（最終レビュー指摘 F3）。
+                色はこのカード固有の見せ方なので、文字列だけ受け取ってここで着ける
+              */}
+              <span
+                className={
+                  s.depletionAge !== null
+                    ? "text-red-700"
+                    : s.temporaryShortfall
+                      ? "text-amber-700"
+                      : "text-emerald-700"
+                }
+              >
+                {scenarioOutcome(s)}
+              </span>
             </div>
             {/*
               95歳時点の残高は補助情報。主役は上の「◯歳で尽きる」。

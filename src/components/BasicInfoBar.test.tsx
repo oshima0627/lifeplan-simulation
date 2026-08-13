@@ -70,9 +70,12 @@ describe("BasicInfoBar の項目", () => {
 });
 
 describe("BasicInfoBar の警告行", () => {
-  it("入力が妥当なら警告行は無い", () => {
+  it("入力が妥当なら role=status の要素はあるが中身は空", () => {
+    // role="status" の要素自体は常に描画し、中身だけを出し入れする（最終レビュー指摘 F4）。
+    // 要素ごと出し入れすると、ライブリージョンが中身と同時にDOMへ挿入されることになり、
+    // スクリーンリーダーの実装によっては読み上げが発火しないことがある
     render(<BasicInfoBar sheet={BASE} onChange={() => {}} />);
-    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(screen.getByRole("status")).toBeEmptyDOMElement();
   });
 
   it("リタイア年齢が現在年齢を下回ると role=status の警告が出る", () => {
@@ -93,6 +96,12 @@ describe("BasicInfoBar の警告行", () => {
     const sheet: HearingSheet = { ...BASE, currentAge: 70, retirementAge: 70, pensionStartAge: 65 };
     render(<BasicInfoBar sheet={sheet} onChange={() => {}} />);
     expect(screen.getByRole("status")).toHaveTextContent(/年金の受給開始年齢/);
+  });
+
+  it("年金の受給開始年齢の警告には、フォーム側と同じ「直し方」が添えられる（最終レビュー指摘 F5）", () => {
+    const sheet: HearingSheet = { ...BASE, currentAge: 70, retirementAge: 70, pensionStartAge: 65 };
+    render(<BasicInfoBar sheet={sheet} onChange={() => {}} />);
+    expect(screen.getByRole("status")).toHaveTextContent(/現在の年齢以上に修正してください/);
   });
 
   it("2つとも不正なら両方の文言が1つの status に出る", () => {

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 //
 // select の option 構成と onChange の型を検証するので jsdom が要る。
-// 環境指定の作法は src/components/HearingForm.test.tsx に合わせている
+// 環境指定の作法は src/components/OptionalDetailsForm.test.tsx に合わせている
 
 import "@testing-library/jest-dom/vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";

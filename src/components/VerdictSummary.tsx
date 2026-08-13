@@ -1,14 +1,7 @@
 "use client";
 
 import type { LifeplanResult } from "@/lib/lifeplan/types";
-import { verdictHeadline } from "@/lib/lifeplan/verdict";
-
-/** 1シナリオの結末を短く言い切る。固定領域に置くので1行に収める */
-function outcome(s: LifeplanResult["scenarios"][number]): string {
-  if (s.depletionAge !== null) return `${s.depletionAge}歳で尽きる`;
-  if (s.temporaryShortfall) return "一時的に不足";
-  return "尽きない";
-}
+import { scenarioOutcome, verdictHeadline } from "@/lib/lifeplan/verdict";
 
 /**
  * 判定を1行に圧縮したもの。画面に固定される領域に置く。
@@ -35,7 +28,7 @@ export function VerdictSummary({ result }: { result: LifeplanResult }) {
           key={s.key}
           className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-xs text-slate-600"
         >
-          {`${s.label} ${outcome(s)}`}
+          {`${s.label} ${scenarioOutcome(s)}`}
         </span>
       ))}
     </div>

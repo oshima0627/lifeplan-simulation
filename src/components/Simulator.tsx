@@ -96,7 +96,11 @@ export function Simulator() {
         ⚠️ 背景を不透明にすること。透明だと下からスクロールしてきた文字が
         透けて重なる。z-40 はポップアップ（z-50）より下、他より上
         ⚠️ この要素より上（layout.tsx / page.tsx）に overflow を足さないこと。
-        祖先に overflow があると sticky はエラーも出さずに効かなくなる
+        祖先に overflow があると sticky はエラーも出さずに効かなくなる。
+        「モーダル表示中は背景スクロールを止めたい」という理由で document.body に
+        実行時に overflow: hidden を付ける実装を足すのも同じく sticky を黙って殺す
+        （body も祖先である以上、CSS で足すか JS で足すかは関係ない）。
+        後日ありがちな追加なので、ここに書き足しておく
       */}
       <div className="sticky top-0 z-40 -mx-4 border-b border-slate-200 bg-slate-50 px-4 pb-3">
         <BasicInfoBar sheet={sheet} onChange={setSheet} />

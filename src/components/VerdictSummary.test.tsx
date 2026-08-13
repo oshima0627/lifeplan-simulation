@@ -44,6 +44,8 @@ describe("VerdictSummary", () => {
     render(<VerdictSummary result={result} />);
     expect(screen.getByText("楽観 尽きない")).toBeInTheDocument();
     expect(screen.getByText("普通 83歳で尽きる")).toBeInTheDocument();
-    expect(screen.getByText("悲観 一時的に不足")).toBeInTheDocument();
+    // 「一時的に不足」ではなく「一時的に資金不足」。DepletionVerdict と表記を
+    // 揃えた scenarioOutcome に集約されたため（最終レビュー指摘 F3）
+    expect(screen.getByText("悲観 一時的に資金不足")).toBeInTheDocument();
   });
 });
