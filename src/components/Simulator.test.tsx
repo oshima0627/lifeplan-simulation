@@ -279,4 +279,16 @@ describe("固定領域とスクロール領域の分離", () => {
     fireEvent.click(await screen.findByRole("button", { name: "入力する" }));
     expect(screen.getByRole("dialog")).toBeInTheDocument();
   });
+
+  it("年間収支は広い画面用と狭い画面用の2か所に用意されている（表示されるのは常に片方）", async () => {
+    localStorage.clear();
+    render(<Simulator />);
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    // 狭い画面では左カラム（BasicInfoFields）ごと消えるため、
+    // 右カラム側にも lg:hidden の控えを置いている。
+    // jsdom はメディアクエリを評価しないので両方がDOMに載る
+    await screen.findByLabelText("現在の年齢");
+    expect(screen.getAllByText("年間収支（自動計算）")).toHaveLength(2);
+  });
 });

@@ -43,7 +43,8 @@ describe("InputWarnings", () => {
 
   it("年金の受給開始年齢が現在年齢を下回ると、直し方つきの警告が出る", () => {
     const sheet: HearingSheet = { ...BASE, currentAge: 70, retirementAge: 70, pensionStartAge: 65 };
-    const status = (render(<InputWarnings sheet={sheet} />), screen.getByRole("status"));
+    render(<InputWarnings sheet={sheet} />);
+    const status = screen.getByRole("status");
     expect(status).toHaveTextContent(/年金の受給開始年齢/);
     expect(status).toHaveTextContent(/現在の年齢以上に修正してください/);
   });

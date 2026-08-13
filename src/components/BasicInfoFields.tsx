@@ -64,6 +64,10 @@ export function BasicInfoFields({
         </select>
       </label>
 
+      {/*
+        ⚠️ ここから先のヒント文は HearingModal のものより短い。意図的な差であり、
+        揃えるべき取り残しではない（設計書 §6.1 の表がこの短い方を指定している）
+      */}
       <SelectField
         label="世帯手取り年収"
         value={sheet.householdNetIncome}

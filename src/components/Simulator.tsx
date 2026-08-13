@@ -9,6 +9,7 @@ import { DEFAULT_SHEET, loadSheet, saveSheet } from "@/lib/storage";
 import { BasicInfoFields } from "./BasicInfoFields";
 import { CashflowChart } from "./CashflowChart";
 import { DepletionVerdict } from "./DepletionVerdict";
+import { DerivedSummary } from "./DerivedSummary";
 import { HearingModal } from "./HearingModal";
 import { InputWarnings } from "./InputWarnings";
 import { OptionalDetailsForm } from "./OptionalDetailsForm";
@@ -136,6 +137,15 @@ export function Simulator() {
           </div>
 
           <DepletionVerdict result={result} sheet={sheet} />
+
+          {/*
+            狭い画面では左カラムごと BasicInfoFields が消えるので、
+            年間収支もそこに置いたままだと一切たどり着けなくなる。
+            ⚠️ lg:hidden を外さないこと。外すと広い画面で年間収支が2つ出る
+          */}
+          <div className="lg:hidden">
+            <DerivedSummary sheet={sheet} />
+          </div>
 
           {/*
             ⚠️ ここを左カラムに入れないこと。狭い画面で左カラムごと消えて

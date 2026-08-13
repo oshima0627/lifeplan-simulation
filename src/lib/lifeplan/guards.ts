@@ -4,7 +4,7 @@ import type { HearingSheet, LifeEvent } from "./types";
 /**
  * 「黙って間違う」条件を1か所にまとめた純粋関数群。
  *
- * BasicInfoBar・OptionalDetailsForm・HearingModal の3つが同じ条件を使う必要がある
+ * BasicInfoFields・InputWarnings・OptionalDetailsForm・HearingModal の4つが同じ条件を使う必要がある
  * （最終レビュー指摘 C1）。条件式をコンポーネントごとにコピーすると、
  * 一方だけ直して他方に反映し忘れる事故が再発するため、ここに集約する
  */
