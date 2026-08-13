@@ -79,14 +79,14 @@ describe("Simulator の保存・復元・リセット", () => {
   });
 });
 
-describe("初回訪問のモーダル", () => {
+describe("ポップアップ", () => {
   it("保存が無ければモーダルが開く", async () => {
     localStorage.clear();
     render(<Simulator />);
     expect(await screen.findByRole("dialog")).toHaveAccessibleName("あなたのこと");
   });
 
-  it("保存があればモーダルは開かない", async () => {
+  it("保存があってもモーダルは開く（毎回開く）", async () => {
     localStorage.setItem(
       "lifeplan.sheet.v2",
       JSON.stringify({
@@ -100,16 +100,14 @@ describe("初回訪問のモーダル", () => {
       }),
     );
     render(<Simulator />);
-    // 復元エフェクトが走りきるのを待ってから確認する
-    expect(await screen.findByText("入力をやり直す")).toBeInTheDocument();
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(await screen.findByRole("dialog")).toHaveAccessibleName("あなたのこと");
   });
 
-  it("「入力をやり直す」でモーダルが開く", async () => {
+  it("毎回開くが、保存済みの値は復元されたうえで開く", async () => {
     localStorage.setItem(
       "lifeplan.sheet.v2",
       JSON.stringify({
-        currentAge: 40,
+        currentAge: 52,
         occupation: "employee",
         householdNetIncome: 6_000_000,
         annualLivingCost: 3_600_000,
@@ -119,7 +117,14 @@ describe("初回訪問のモーダル", () => {
       }),
     );
     render(<Simulator />);
-    // モーダルが自動で開くとラベルが二重になるので、先に閉じる
+    const dialog = await screen.findByRole("dialog");
+    // モーダル側の「現在の年齢」に復元値が入っていること
+    expect(within(dialog).getByLabelText("現在の年齢")).toHaveValue("52");
+  });
+
+  it("閉じたあと「入力をやり直す」で開き直せる", async () => {
+    localStorage.clear();
+    render(<Simulator />);
     fireEvent.keyDown(document, { key: "Escape" });
     fireEvent.click(await screen.findByText("入力をやり直す"));
     expect(screen.getByRole("dialog")).toBeInTheDocument();
