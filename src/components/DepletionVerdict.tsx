@@ -2,6 +2,7 @@
 
 import { formatCompactYen } from "@/lib/format";
 import type { HearingSheet, LifeplanResult } from "@/lib/lifeplan/types";
+import { verdictHeadline } from "@/lib/lifeplan/verdict";
 
 /**
  * 「資産が尽きる年」の判定（docs/requirements.md §5.3）。
@@ -54,13 +55,7 @@ export function DepletionVerdict({
             : "border-amber-300 bg-amber-50"
         }`}
       >
-        <div className="text-lg font-bold text-slate-900">
-          {survivesAllScenarios
-            ? "悲観シナリオでも資産は尽きません"
-            : anyDepletes
-              ? "資産が尽きるシナリオがあります"
-              : "尽きはしませんが、一時的に資金不足になるシナリオがあります"}
-        </div>
+        <div className="text-lg font-bold text-slate-900">{verdictHeadline(result)}</div>
         <p className="mt-1 text-sm text-slate-700">
           {survivesAllScenarios
             ? "この計画は強いと言えます。使う側に回す余地がないか、一度考えてみてください。"
