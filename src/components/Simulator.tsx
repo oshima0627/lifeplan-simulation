@@ -6,11 +6,14 @@ import { runAllScenarios } from "@/lib/lifeplan/scenarios";
 import { toRealTerms } from "@/lib/lifeplan/realTerms";
 import type { HearingSheet } from "@/lib/lifeplan/types";
 import { DEFAULT_SHEET, loadSheet, saveSheet } from "@/lib/storage";
+import { BasicInfoBar } from "./BasicInfoBar";
 import { CashflowChart } from "./CashflowChart";
 import { DepletionVerdict } from "./DepletionVerdict";
-import { HearingForm } from "./HearingForm";
+import { DerivedSummary } from "./DerivedSummary";
 import { HearingModal } from "./HearingModal";
+import { OptionalDetailsForm } from "./OptionalDetailsForm";
 import SavedPlans from "./plans/SavedPlans";
+import { VerdictSummary } from "./VerdictSummary";
 
 /**
  * 全体の組み立て。
@@ -34,13 +37,11 @@ export function Simulator() {
     if (saved) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setSheet(saved);
-    } else {
-      // 保存が無い＝初回訪問。何を入れればいいか分からない人を
-      // ステップ式の入力に案内する。復元と同じエフェクトで判定するのは、
-      // 別エフェクトにすると復元前に「保存が無い」と誤判定して
-      // 毎回開いてしまうため
-      setModalOpen(true);
     }
+    // ⚠️ 保存の有無で分岐しない。利用者の判断（2026-08-13）で毎回開く。
+    // 復元と同じエフェクトで開くのは順序のため——別エフェクトにすると
+    // 復元前の既定値が一瞬モーダルに映る
+    setModalOpen(true);
   }, []);
 
   // 復元エフェクトと同じフラッシュで走る初回の保存を飛ばすためのフラグ。
@@ -90,15 +91,31 @@ export function Simulator() {
           setModalOpen(false);
         }}
       />
-      <div className="grid gap-6 lg:grid-cols-[minmax(320px,380px)_1fr]">
-        {/*
-          モバイルでは判定カードが「主役」（docs/requirements.md §6）。
-          フォーム(15項目前後)より先に表示されないと、判定に辿り着く前に
-          スクロールで力尽きる。order で見た目の順序だけ入れ替え、
-          DOM順・lg以上のカラム配置（フォーム左・結果右）は変えない
-        */}
-        <div className="order-2 flex flex-col gap-4 lg:order-1 lg:sticky lg:top-6 lg:self-start">
-          <HearingForm sheet={sheet} onChange={setSheet} />
+      {/*
+        画面に固定される領域。バー・警告・判定1行・グラフをここに入れる。
+        ⚠️ 背景を不透明にすること。透明だと下からスクロールしてきた文字が
+        透けて重なる。z-40 はポップアップ（z-50）より下、他より上
+        ⚠️ この要素より上（layout.tsx / page.tsx）に overflow を足さないこと。
+        祖先に overflow があると sticky はエラーも出さずに効かなくなる。
+        「モーダル表示中は背景スクロールを止めたい」という理由で document.body に
+        実行時に overflow: hidden を付ける実装を足すのも同じく sticky を黙って殺す
+        （body も祖先である以上、CSS で足すか JS で足すかは関係ない）。
+        後日ありがちな追加なので、ここに書き足しておく
+      */}
+      <div className="sticky top-0 z-40 -mx-4 border-b border-slate-200 bg-slate-50 px-4 pb-3">
+        <BasicInfoBar sheet={sheet} onChange={setSheet} />
+        <div className="mt-2 flex flex-col gap-2">
+          <VerdictSummary result={result} />
+          <CashflowChart result={result} />
+        </div>
+      </div>
+
+      {/* ここから下がスクロールする */}
+      <div className="flex flex-col gap-6 pt-6">
+        <DepletionVerdict result={result} sheet={sheet} />
+        <DerivedSummary sheet={sheet} />
+        <OptionalDetailsForm sheet={sheet} onChange={setSheet} />
+        <div className="flex flex-col gap-4">
           <button
             type="button"
             className="self-start text-xs text-slate-600 underline hover:text-slate-900"
@@ -110,10 +127,9 @@ export function Simulator() {
             type="button"
             className="self-start text-xs text-slate-500 underline hover:text-slate-800"
             onClick={() => {
-              // clearSheet() は呼ばない。sheet を変えれば下の保存エフェクトが
+              // clearSheet() は呼ばない。sheet を変えれば保存エフェクトが
               // 追随して DEFAULT_SHEET を localStorage に書き込むため、
               // ここで先に消しても直後の保存エフェクトに上書きされて意味がなかった
-              // （呼んでも呼ばなくても結果は同じ、というデッドコードだった）
               setSheet(DEFAULT_SHEET);
             }}
           >
@@ -122,18 +138,14 @@ export function Simulator() {
           {/* ログインしている人にだけ出る。未ログインなら何も描画しない */}
           <SavedPlans sheet={sheet} onLoad={setSheet} />
         </div>
-        <div className="order-1 flex flex-col gap-6 lg:order-2">
-          <DepletionVerdict result={result} sheet={sheet} />
-          <CashflowChart result={result} />
-          <p className="text-xs text-slate-500">
-            <strong>金額はすべて今日の購買力に換算しています。</strong>
-            将来の物価上昇分を差し引いた「実質」の値です。
-            楽観＝実質利回り5%・実質昇給+1% ／ 普通＝3%・0% ／ 悲観＝1%・-1%。
-            退職金は名目で受け取る前提のため、インフレ（楽観1%・普通2%・悲観3%）で目減りさせて表示しています。
-            95歳までを試算しています。
-            この結果は特定の金融商品を推奨するものではありません。
-          </p>
-        </div>
+        <p className="text-xs text-slate-500">
+          <strong>金額はすべて今日の購買力に換算しています。</strong>
+          将来の物価上昇分を差し引いた「実質」の値です。
+          楽観＝実質利回り5%・実質昇給+1% ／ 普通＝3%・0% ／ 悲観＝1%・-1%。
+          退職金は名目で受け取る前提のため、インフレ（楽観1%・普通2%・悲観3%）で目減りさせて表示しています。
+          95歳までを試算しています。
+          この結果は特定の金融商品を推奨するものではありません。
+        </p>
       </div>
     </>
   );

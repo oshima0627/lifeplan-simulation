@@ -2,6 +2,7 @@
 
 import { formatCompactYen } from "@/lib/format";
 import type { HearingSheet, LifeplanResult } from "@/lib/lifeplan/types";
+import { scenarioOutcome, verdictHeadline } from "@/lib/lifeplan/verdict";
 
 /**
  * 「資産が尽きる年」の判定（docs/requirements.md §5.3）。
@@ -54,19 +55,13 @@ export function DepletionVerdict({
             : "border-amber-300 bg-amber-50"
         }`}
       >
-        <div className="text-lg font-bold text-slate-900">
-          {survivesAllScenarios
-            ? "悲観シナリオでも資産は尽きません"
-            : anyDepletes
-              ? "資産が尽きるシナリオがあります"
-              : "尽きはしませんが、一時的に資金不足になるシナリオがあります"}
-        </div>
+        <div className="text-lg font-bold text-slate-900">{verdictHeadline(result)}</div>
         <p className="mt-1 text-sm text-slate-700">
           {survivesAllScenarios
             ? "この計画は強いと言えます。使う側に回す余地がないか、一度考えてみてください。"
             : anyDepletes
-              ? "打ち手は5つです。生活費を下げる / 収入を増やす / 利回り・期間を見直す / 想定外の支出を防ぐ / 支出の優先順位を見直す。左のフォームを変えてその場で試せます。"
-              : "最終的には資産が残るものの、途中でマイナスの期間があります。この試算はマイナス残高を無利息で借り続けられる前提を置いているため、実際には取り崩す順序やタイミングの見直しが必要です。「強い計画」と言い切るにはまだ早く、左のフォームを変えて一時的な不足を解消できないか試してみてください。"}
+              ? "打ち手は5つです。生活費を下げる / 収入を増やす / 利回り・期間を見直す / 想定外の支出を防ぐ / 支出の優先順位を見直す。上のバーを変えてその場で試せます。"
+              : "最終的には資産が残るものの、途中でマイナスの期間があります。この試算はマイナス残高を無利息で借り続けられる前提を置いているため、実際には取り崩す順序やタイミングの見直しが必要です。「強い計画」と言い切るにはまだ早く、上のバーを変えて一時的な不足を解消できないか試してみてください。"}
         </p>
       </div>
 
@@ -75,13 +70,21 @@ export function DepletionVerdict({
           <div key={s.key} className="rounded border border-slate-200 bg-white p-3">
             <div className="text-xs font-medium text-slate-500">{s.label}</div>
             <div className="mt-1 text-sm font-bold text-slate-900">
-              {s.depletionAge !== null ? (
-                <span className="text-red-700">{s.depletionAge}歳で尽きる</span>
-              ) : s.temporaryShortfall ? (
-                <span className="text-amber-700">一時的に資金不足</span>
-              ) : (
-                <span className="text-emerald-700">尽きない</span>
-              )}
+              {/*
+                文言（「◯歳で尽きる」等）は scenarioOutcome に集約済み（最終レビュー指摘 F3）。
+                色はこのカード固有の見せ方なので、文字列だけ受け取ってここで着ける
+              */}
+              <span
+                className={
+                  s.depletionAge !== null
+                    ? "text-red-700"
+                    : s.temporaryShortfall
+                      ? "text-amber-700"
+                      : "text-emerald-700"
+                }
+              >
+                {scenarioOutcome(s)}
+              </span>
             </div>
             {/*
               95歳時点の残高は補助情報。主役は上の「◯歳で尽きる」。

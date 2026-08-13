@@ -24,6 +24,7 @@ import {
   RETIREMENT_AGE_OPTIONS,
 } from "@/lib/options";
 import { SelectField } from "./SelectField";
+import { Steps } from "./Steps";
 
 const OCCUPATION_LABELS: Record<Occupation, string> = {
   employee: "会社員",
@@ -48,9 +49,10 @@ const FIRST_OPTIONAL_STEP = 3;
 /**
  * ステップ式のヒアリングモーダル。
  *
- * 初回訪問で自動的に開き、何を入れればいいか分からない人を最後まで導く。
- * 2回目以降の微調整は横並びの HearingForm で行う（即座に再計算される体験を
- * 失わせないため。docs/requirements.md §6）。
+ * 毎回開き、何を入れればいいか分からない人を最後まで導く（利用者の判断で
+ * 2026-08-13 に「初回訪問だけ」から変更。Simulator.tsx 参照）。
+ * 2回目以降の微調整は、画面に固定される基本情報バー（BasicInfoBar）で行う
+ * （即座に再計算される体験を失わせないため。docs/requirements.md §6）。
  *
  * <dialog> を使わないのは、jsdom の showModal() サポートが環境依存で、
  * テストが実装ではなく環境の都合で落ちるため
@@ -68,6 +70,9 @@ export function HearingModal({
 }) {
   const [step, setStep] = useState(0);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  // 開く直前にフォーカスがあった要素。閉じたらここへ返す
+  const restoreFocusRef = useRef<HTMLElement | null>(null);
 
   // 開き直したときは最初から始める。前回の途中位置を覚えていると、
   // 「入力をやり直す」を押したのに5ステップ目が出る、という挙動になる
@@ -76,18 +81,58 @@ export function HearingModal({
     if (open) setStep(0);
   }, [open]);
 
-  // 開いたときにモーダル内の最初の操作要素（✕ボタン）へフォーカスを移す。
-  // 完全なフォーカストラップは今回のスコープ外（最終レビュー指摘 C2）
+  // 開いている間だけ、閉じたときの戻り先を覚えておく。
+  // クリーンアップで返すので、閉じ方（✕・Escape・この内容で見る）を問わず1か所で済む。
+  //
+  // ⚠️ 下の「✕ボタンへフォーカスを移す」エフェクトより先に実行される必要がある。
+  // 後だと、captureする時点で既にフォーカスが✕ボタンに移っており、
+  // 呼び出し元の要素を記録できない
+  useEffect(() => {
+    if (!open) return;
+    restoreFocusRef.current = document.activeElement as HTMLElement | null;
+    return () => {
+      restoreFocusRef.current?.focus?.();
+    };
+  }, [open]);
+
+  // 開いたときにモーダル内の最初の操作要素（✕ボタン）へフォーカスを移す
   useEffect(() => {
     if (open) closeButtonRef.current?.focus();
   }, [open]);
 
-  // Escape で閉じる。モーダルの慣習であり、これが無いと閉じ方が
-  // 「結果を見る」まで進むしかなくなる
+  // Escape で閉じる。加えて Tab をモーダル内で循環させる。
+  //
+  // ⚠️ モーダルを毎回開くようにしたので、これは全利用者の必経路になった。
+  // キーボードだけで操作する人がモーダルの外へ抜けると、背後のバーを
+  // 操作できてしまい、どこにいるのか分からなくなる
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") {
+        onClose();
+        return;
+      }
+      if (e.key !== "Tab") return;
+
+      const root = dialogRef.current;
+      if (!root) return;
+      const focusables = root.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), select, input, textarea, a[href], [tabindex]:not([tabindex="-1"])',
+      );
+      if (focusables.length === 0) return;
+
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      const active = document.activeElement;
+      const outside = !root.contains(active);
+
+      if (e.shiftKey && (active === first || outside)) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && (active === last || outside)) {
+        e.preventDefault();
+        first.focus();
+      }
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
@@ -115,6 +160,7 @@ export function HearingModal({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4">
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-label={STEP_TITLES[step]}
@@ -122,9 +168,7 @@ export function HearingModal({
       >
         <div className="flex items-start justify-between gap-2">
           <div>
-            <p className="text-xs text-slate-500">
-              ステップ {step + 1} / {STEP_TITLES.length}
-            </p>
+            <Steps titles={STEP_TITLES} current={step} onSelect={setStep} />
             <h2 className="mt-1 text-lg font-bold text-slate-900">{STEP_TITLES[step]}</h2>
           </div>
           <button
@@ -414,6 +458,17 @@ export function HearingModal({
             )}
           </div>
           <div className="flex gap-2">
+            {/*
+              毎回開く以上、再訪者が抜ける道が要る。
+              ✕ と Escape だけでは「閉じ方が分からない」人が6ステップ押し切ることになる
+            */}
+            <button
+              type="button"
+              className="rounded px-3 py-2 text-sm text-slate-600 underline hover:text-slate-900"
+              onClick={onClose}
+            >
+              この内容で見る
+            </button>
             {canSkip && (
               <button
                 type="button"

@@ -40,6 +40,8 @@ describe("Simulator の保存・復元・リセット", () => {
     saveSheet(saved);
 
     render(<Simulator />);
+    // モーダルが自動で開くとラベルが二重になるので、先に閉じる
+    fireEvent.keyDown(document, { key: "Escape" });
 
     const input = await screen.findByLabelText(/^現在の年齢/);
     expect(input).toHaveValue("52");
@@ -63,6 +65,8 @@ describe("Simulator の保存・復元・リセット", () => {
     saveSheet(saved);
 
     render(<Simulator />);
+    // モーダルが自動で開くとラベルが二重になるので、先に閉じる
+    fireEvent.keyDown(document, { key: "Escape" });
     const input = await screen.findByLabelText(/^現在の年齢/);
     // 復元されていることを先に確認してから、リセットの効果を見る
     expect(input).toHaveValue("60");
@@ -75,14 +79,14 @@ describe("Simulator の保存・復元・リセット", () => {
   });
 });
 
-describe("初回訪問のモーダル", () => {
+describe("ポップアップ", () => {
   it("保存が無ければモーダルが開く", async () => {
     localStorage.clear();
     render(<Simulator />);
     expect(await screen.findByRole("dialog")).toHaveAccessibleName("あなたのこと");
   });
 
-  it("保存があればモーダルは開かない", async () => {
+  it("保存があってもモーダルは開く（毎回開く）", async () => {
     localStorage.setItem(
       "lifeplan.sheet.v2",
       JSON.stringify({
@@ -96,16 +100,14 @@ describe("初回訪問のモーダル", () => {
       }),
     );
     render(<Simulator />);
-    // 復元エフェクトが走りきるのを待ってから確認する
-    expect(await screen.findByText("入力をやり直す")).toBeInTheDocument();
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(await screen.findByRole("dialog")).toHaveAccessibleName("あなたのこと");
   });
 
-  it("「入力をやり直す」でモーダルが開く", async () => {
+  it("毎回開くが、保存済みの値は復元されたうえで開く", async () => {
     localStorage.setItem(
       "lifeplan.sheet.v2",
       JSON.stringify({
-        currentAge: 40,
+        currentAge: 52,
         occupation: "employee",
         householdNetIncome: 6_000_000,
         annualLivingCost: 3_600_000,
@@ -115,6 +117,15 @@ describe("初回訪問のモーダル", () => {
       }),
     );
     render(<Simulator />);
+    const dialog = await screen.findByRole("dialog");
+    // モーダル側の「現在の年齢」に復元値が入っていること
+    expect(within(dialog).getByLabelText("現在の年齢")).toHaveValue("52");
+  });
+
+  it("閉じたあと「入力をやり直す」で開き直せる", async () => {
+    localStorage.clear();
+    render(<Simulator />);
+    fireEvent.keyDown(document, { key: "Escape" });
     fireEvent.click(await screen.findByText("入力をやり直す"));
     expect(screen.getByRole("dialog")).toBeInTheDocument();
   });
@@ -233,5 +244,25 @@ describe("実質表示", () => {
     expect(within(card).queryByText(/3\.2億円/)).not.toBeInTheDocument();
     // 名目値でもないこと
     expect(within(card).queryByText(/11\.7億円/)).not.toBeInTheDocument();
+  });
+});
+
+describe("固定領域とスクロール領域の分離", () => {
+  it("任意項目はバーではなくスクロール領域にある", async () => {
+    localStorage.clear();
+    render(<Simulator />);
+    fireEvent.keyDown(document, { key: "Escape" });
+    // バーに載せてよいのは8項目まで。子供の追加ボタンはスクロール領域側
+    expect(await screen.findByRole("button", { name: "子供を追加" })).toBeInTheDocument();
+
+    // 存在チェックだけでは、退職金が BasicInfoBar の中に描画されていても
+    // 通ってしまう（最終レビュー指摘 F6）。画面に固定される領域（.sticky）の
+    // 外側にあることまで確認する。.sticky は Simulator.tsx が固定領域の
+    // ルートに付けているクラスで、sticky が効くための制約として
+    // コメント済み（祖先に overflow を足さないこと、等）の対象そのものでもある
+    const fixedArea = document.querySelector(".sticky");
+    expect(fixedArea).not.toBeNull();
+    expect(within(fixedArea as HTMLElement).queryByLabelText("退職金")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("退職金")).toBeInTheDocument();
   });
 });

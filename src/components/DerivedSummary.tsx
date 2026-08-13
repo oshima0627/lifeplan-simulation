@@ -21,15 +21,13 @@ export function DerivedSummary({ sheet }: { sheet: HearingSheet }) {
         isNegative ? "border-red-300 bg-red-50" : "border-slate-200 bg-white"
       }`}
     >
-      <div className="font-medium text-slate-700">年間収支（自動計算）</div>
-      <div
-        className={`mt-1 text-2xl font-bold tabular-nums ${
-          isNegative ? "text-red-700" : "text-slate-900"
-        }`}
-      >
-        {formatYen(annualBalance)}
+      {/*
+        年額は基本情報バーのバッジが出すので、ここでは繰り返さない。
+        月あたりの額と、実感と照らし合わせるための説明だけを残す
+      */}
+      <div className="font-medium text-slate-700">
+        年間収支は月あたり <span className="tabular-nums font-bold">{formatYen(monthly)}</span>
       </div>
-      <div className="mt-1 text-slate-600">月あたり {formatYen(monthly)}</div>
       <p className="mt-2 text-xs text-slate-500">
         {isNegative
           ? "支出が収入を上回っています。生活費の入力が実態と合っているか確認してください。"
