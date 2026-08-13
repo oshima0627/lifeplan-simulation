@@ -10,6 +10,7 @@ import { CashflowChart } from "./CashflowChart";
 import { DepletionVerdict } from "./DepletionVerdict";
 import { HearingForm } from "./HearingForm";
 import { HearingModal } from "./HearingModal";
+import SavedPlans from "./plans/SavedPlans";
 
 /**
  * 全体の組み立て。
@@ -118,6 +119,8 @@ export function Simulator() {
           >
             入力内容を消して初期値に戻す
           </button>
+          {/* ログインしている人にだけ出る。未ログインなら何も描画しない */}
+          <SavedPlans sheet={sheet} onLoad={setSheet} />
         </div>
         <div className="order-1 flex flex-col gap-6 lg:order-2">
           <DepletionVerdict result={result} sheet={sheet} />

@@ -14,7 +14,8 @@ export default function Home() {
           <strong>資産が何歳で尽きるか</strong>を楽観・普通・悲観の3シナリオで確かめます。
         </p>
         <p className="mt-2 text-xs text-slate-500">
-          入力内容はお使いのブラウザにのみ保存され、サーバーには送信されません。
+          入力内容はお使いのブラウザに保存されます。
+          ログインして「保存」を押したときだけ、サーバーにも保存されます。
           <Link href="/privacy" className="ml-1 underline">
             プライバシーについて
           </Link>

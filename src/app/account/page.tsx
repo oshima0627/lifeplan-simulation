@@ -2,7 +2,6 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import PlanCard from "@/components/billing/PlanCard";
 import { fetchMe, logout } from "@/lib/auth/client";
 
 type Status = "loading" | "loggedIn" | "loggedOut";
@@ -69,8 +68,13 @@ export default function AccountPage() {
           >
             {loggingOut ? "処理中…" : "ログアウト"}
           </button>
-          {/* 契約状態はログイン後にしか意味が無いので、ここでだけ描画する */}
-          <PlanCard />
+          {/*
+            課金の導線は当面出さない（2026-08-13の判断）。
+            AI機能をやめたため「月1,980円が何の対価か」が決まっておらず、
+            決まるまで契約させない。
+            ⚠️ src/components/billing/PlanCard.tsx と worker/billing/、
+            Stripe側の設定はすべて残してある。ここに <PlanCard /> を戻せば復活する。
+          */}
         </div>
       )}
     </main>
