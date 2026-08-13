@@ -6,11 +6,12 @@ import { runAllScenarios } from "@/lib/lifeplan/scenarios";
 import { toRealTerms } from "@/lib/lifeplan/realTerms";
 import type { HearingSheet } from "@/lib/lifeplan/types";
 import { DEFAULT_SHEET, loadSheet, saveSheet } from "@/lib/storage";
-import { BasicInfoBar } from "./BasicInfoBar";
+import { BasicInfoFields } from "./BasicInfoFields";
 import { CashflowChart } from "./CashflowChart";
 import { DepletionVerdict } from "./DepletionVerdict";
 import { DerivedSummary } from "./DerivedSummary";
 import { HearingModal } from "./HearingModal";
+import { InputWarnings } from "./InputWarnings";
 import { OptionalDetailsForm } from "./OptionalDetailsForm";
 import SavedPlans from "./plans/SavedPlans";
 import { VerdictSummary } from "./VerdictSummary";
@@ -91,61 +92,98 @@ export function Simulator() {
           setModalOpen(false);
         }}
       />
-      {/*
-        画面に固定される領域。バー・警告・判定1行・グラフをここに入れる。
-        ⚠️ 背景を不透明にすること。透明だと下からスクロールしてきた文字が
-        透けて重なる。z-40 はポップアップ（z-50）より下、他より上
-        ⚠️ この要素より上（layout.tsx / page.tsx）に overflow を足さないこと。
-        祖先に overflow があると sticky はエラーも出さずに効かなくなる。
-        「モーダル表示中は背景スクロールを止めたい」という理由で document.body に
-        実行時に overflow: hidden を付ける実装を足すのも同じく sticky を黙って殺す
-        （body も祖先である以上、CSS で足すか JS で足すかは関係ない）。
-        後日ありがちな追加なので、ここに書き足しておく
-      */}
-      <div className="sticky top-0 z-40 -mx-4 border-b border-slate-200 bg-slate-50 px-4 pb-3">
-        <BasicInfoBar sheet={sheet} onChange={setSheet} />
-        <div className="mt-2 flex flex-col gap-2">
-          <VerdictSummary result={result} />
-          <CashflowChart result={result} />
-        </div>
-      </div>
 
-      {/* ここから下がスクロールする */}
-      <div className="flex flex-col gap-6 pt-6">
-        <DepletionVerdict result={result} sheet={sheet} />
-        <DerivedSummary sheet={sheet} />
-        <OptionalDetailsForm sheet={sheet} onChange={setSheet} />
-        <div className="flex flex-col gap-4">
-          <button
-            type="button"
-            className="self-start text-xs text-slate-600 underline hover:text-slate-900"
-            onClick={() => setModalOpen(true)}
-          >
-            入力をやり直す
-          </button>
-          <button
-            type="button"
-            className="self-start text-xs text-slate-500 underline hover:text-slate-800"
-            onClick={() => {
-              // clearSheet() は呼ばない。sheet を変えれば保存エフェクトが
-              // 追随して DEFAULT_SHEET を localStorage に書き込むため、
-              // ここで先に消しても直後の保存エフェクトに上書きされて意味がなかった
-              setSheet(DEFAULT_SHEET);
-            }}
-          >
-            入力内容を消して初期値に戻す
-          </button>
-          {/* ログインしている人にだけ出る。未ログインなら何も描画しない */}
-          <SavedPlans sheet={sheet} onLoad={setSheet} />
+      <div className="grid gap-6 lg:grid-cols-[minmax(320px,380px)_1fr]">
+        {/*
+          左カラム: 入力フォーム。固定せず、普通に縦スクロールする。
+          ⚠️ 狭い画面（1024px未満）では描画しない。そこでの入力は
+          固定領域の「入力する」ボタンからポップアップで行う（設計書 §3.2）。
+          768px で2カラムにするとグラフが約340pxまで潰れて資産カーブが読めないため、
+          区切りは lg（1024px）にしてある
+        */}
+        <div className="hidden flex-col gap-6 lg:flex">
+          <BasicInfoFields sheet={sheet} onChange={setSheet} />
+          <OptionalDetailsForm sheet={sheet} onChange={setSheet} />
         </div>
-        <p className="text-xs text-slate-500">
-          <strong>金額はすべて今日の購買力に換算しています。</strong>
-          将来の物価上昇分を差し引いた「実質」の値です。
-          楽観＝実質利回り5%・実質昇給+1% ／ 普通＝3%・0% ／ 悲観＝1%・-1%。
-          退職金は名目で受け取る前提のため、インフレ（楽観1%・普通2%・悲観3%）で目減りさせて表示しています。
-          95歳までを試算しています。
-          この結果は特定の金融商品を推奨するものではありません。
-        </p>
+
+        <div className="flex flex-col gap-6">
+          {/*
+            右カラムの上部を画面に固定する。
+            ⚠️ 背景を不透明にすること。透明だと下からスクロールしてきた文字が
+            透けて重なる。z-40 はポップアップ（z-50）より下、他より上。
+            ⚠️ この要素より上（layout.tsx / page.tsx）に overflow を足さないこと。
+            祖先に overflow があると sticky はエラーも出さずに効かなくなる。
+            「モーダル表示中は背景スクロールを止めたい」という理由で document.body に
+            実行時に overflow: hidden を付ける実装を足すのも同じく sticky を黙って殺す
+            （body も祖先である以上、CSS で足すか JS で足すかは関係ない）。
+            狭い画面では -mx-4/px-4 で背景を画面の端まで伸ばすが、
+            広い画面ではカラムの内側に収める
+          */}
+          <div className="sticky top-0 z-40 -mx-4 flex flex-col gap-2 border-b border-slate-200 bg-slate-50 px-4 py-3 lg:mx-0 lg:border-0 lg:px-0">
+            {/*
+              狭い画面にだけ出す。広い画面は左カラムに入力欄が見えているので
+              ボタンは重複になる（開き直したい人には下の「入力をやり直す」がある）
+            */}
+            <button
+              type="button"
+              className="self-start rounded bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700 lg:hidden"
+              onClick={() => setModalOpen(true)}
+            >
+              入力する
+            </button>
+            <InputWarnings sheet={sheet} />
+            <VerdictSummary result={result} />
+            <CashflowChart result={result} />
+          </div>
+
+          <DepletionVerdict result={result} sheet={sheet} />
+
+          {/*
+            狭い画面では左カラムごと BasicInfoFields が消えるので、
+            年間収支もそこに置いたままだと一切たどり着けなくなる。
+            ⚠️ lg:hidden を外さないこと。外すと広い画面で年間収支が2つ出る
+          */}
+          <div className="lg:hidden">
+            <DerivedSummary sheet={sheet} />
+          </div>
+
+          {/*
+            ⚠️ ここを左カラムに入れないこと。狭い画面で左カラムごと消えて
+            保存したプランに触れなくなる（設計書 §6.3）
+          */}
+          <div className="flex flex-col gap-4">
+            <button
+              type="button"
+              className="self-start text-xs text-slate-600 underline hover:text-slate-900"
+              onClick={() => setModalOpen(true)}
+            >
+              入力をやり直す
+            </button>
+            <button
+              type="button"
+              className="self-start text-xs text-slate-500 underline hover:text-slate-800"
+              onClick={() => {
+                // clearSheet() は呼ばない。sheet を変えれば保存エフェクトが
+                // 追随して DEFAULT_SHEET を localStorage に書き込むため、
+                // ここで先に消しても直後の保存エフェクトに上書きされて意味がなかった
+                setSheet(DEFAULT_SHEET);
+              }}
+            >
+              入力内容を消して初期値に戻す
+            </button>
+            {/* ログインしている人にだけ出る。未ログインなら何も描画しない */}
+            <SavedPlans sheet={sheet} onLoad={setSheet} />
+          </div>
+
+          <p className="text-xs text-slate-500">
+            <strong>金額はすべて今日の購買力に換算しています。</strong>
+            将来の物価上昇分を差し引いた「実質」の値です。
+            楽観＝実質利回り5%・実質昇給+1% ／ 普通＝3%・0% ／ 悲観＝1%・-1%。
+            退職金は名目で受け取る前提のため、インフレ（楽観1%・普通2%・悲観3%）で目減りさせて表示しています。
+            95歳までを試算しています。
+            この結果は特定の金融商品を推奨するものではありません。
+          </p>
+        </div>
       </div>
     </>
   );

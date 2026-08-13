@@ -16,11 +16,9 @@ import {
 import { SelectField } from "./SelectField";
 
 /**
- * 任意項目（Tier 2）の入力フォーム。スクロール領域に置く。
+ * 任意項目（Tier 2）の入力フォーム。左の入力カラムに置く。
  *
- * 基本情報（Tier 1）は BasicInfoBar へ移した。
- * ⚠️ ここの項目をバーへ移さないこと。子供と大きな支出は行が増減するので
- * 横一列に収まらないうえ、バーの項目数が上限（8）を超える（設計書 §6）
+ * 基本情報（Tier 1）は BasicInfoFields が持つ。
  */
 export function OptionalDetailsForm({
   sheet,

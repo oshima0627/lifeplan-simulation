@@ -100,7 +100,7 @@ describe("OptionalDetailsForm の行操作", () => {
 
 describe("黙って間違う条件の警告", () => {
   it("年金受給開始年齢が現在年齢を下回ると警告が出る", () => {
-    // retirementAge はここでは検証しない（リタイア年齢の警告は BasicInfoBar に
+    // retirementAge はここでは検証しない（リタイア年齢の警告は InputWarnings に
     // 一本化済みで、このコンポーネントは表示しない）。BASE の65のままでよい
     const sheet: HearingSheet = { ...BASE, currentAge: 70, pensionStartAge: 65 };
     render(<OptionalDetailsForm sheet={sheet} onChange={() => {}} />);
@@ -119,7 +119,7 @@ describe("黙って間違う条件の警告", () => {
 });
 
 describe("基本情報の切り出し", () => {
-  it("基本情報はここには無い（バーへ移った）", () => {
+  it("基本情報はここには無い（BasicInfoFields が持つ）", () => {
     render(<OptionalDetailsForm sheet={BASE} onChange={() => {}} />);
     expect(screen.queryByLabelText("現在の年齢")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("世帯手取り年収")).not.toBeInTheDocument();
