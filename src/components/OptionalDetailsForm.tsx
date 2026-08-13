@@ -1,42 +1,28 @@
 "use client";
 
-import { DEFAULT_PENSION_START_AGE, LIFE_EXPECTANCY_AGE } from "@/constants/lifeplan";
+import { LIFE_EXPECTANCY_AGE, DEFAULT_PENSION_START_AGE } from "@/constants/lifeplan";
 import { newRowId } from "@/lib/id";
 import { formatCompactYen } from "@/lib/format";
+import { isEventAgeOutOfRange, isPensionStartAgeInvalid } from "@/lib/lifeplan/guards";
+import type { Child, HearingSheet, LifeEvent } from "@/lib/lifeplan/types";
 import {
-  isEventAgeOutOfRange,
-  isPensionStartAgeInvalid,
-  isRetirementAgeInvalid,
-} from "@/lib/lifeplan/guards";
-import type { Child, HearingSheet, LifeEvent, Occupation } from "@/lib/lifeplan/types";
-import {
-  ASSET_OPTIONS,
   CHILD_AGE_OPTIONS,
-  CURRENT_AGE_OPTIONS,
   EVENT_AMOUNT_OPTIONS,
-  INCOME_OPTIONS,
   intOptions,
-  LIVING_COST_OPTIONS,
   LUMP_SUM_OPTIONS,
   PENSION_OPTIONS,
   PENSION_START_AGE_OPTIONS,
-  RETIREMENT_AGE_OPTIONS,
 } from "@/lib/options";
-import { DerivedSummary } from "./DerivedSummary";
 import { SelectField } from "./SelectField";
 
-const OCCUPATION_LABELS: Record<Occupation, string> = {
-  employee: "会社員",
-  civil_servant: "公務員",
-  self_employed: "自営業",
-  other: "その他",
-};
-
 /**
- * ヒアリング項目の入力フォーム。
- * Tier 1（必須）と Tier 2（任意）を視覚的に分ける（docs/requirements.md §4）
+ * 任意項目（Tier 2）の入力フォーム。スクロール領域に置く。
+ *
+ * 基本情報（Tier 1）は BasicInfoBar へ移した。
+ * ⚠️ ここの項目をバーへ移さないこと。子供と大きな支出は行が増減するので
+ * 横一列に収まらないうえ、バーの項目数が上限（8）を超える（設計書 §6）
  */
-export function HearingForm({
+export function OptionalDetailsForm({
   sheet,
   onChange,
 }: {
@@ -50,12 +36,8 @@ export function HearingForm({
   const children = sheet.children ?? [];
   const events = sheet.customEvents ?? [];
 
-  // 現在の年齢をあとから引き上げると、リタイア予定年齢・年金受給開始年齢が
-  // 現在の年齢を下回ることがある。これはイベントの範囲外と違って「試算に反映されない」
-  // のではなく、cashflow.ts の `age < retirementAge` 判定が全期間 false になり、
-  // 給与収入が黙って0円として試算され続けてしまう。年金受給開始年齢も同様に
+  // 現在の年齢をあとから引き上げると、年金受給開始年齢が現在の年齢を下回ることがある。
   // 「現在の年齢より前」を許すと入力の意図と食い違うため、ここで検知して見せる
-  const retirementAgeInvalid = isRetirementAgeInvalid(sheet);
   const pensionStartAgeInvalid = isPensionStartAgeInvalid(sheet);
 
   const setChild = (index: number, patch: Partial<Child>) => {
@@ -71,93 +53,6 @@ export function HearingForm({
   return (
     <div className="flex flex-col gap-6">
       <section className="flex flex-col gap-4">
-        <h2 className="text-base font-bold text-slate-800">基本情報</h2>
-
-        <SelectField
-          label="現在の年齢"
-          value={sheet.currentAge}
-          options={CURRENT_AGE_OPTIONS}
-          onChange={(v) => set("currentAge", v)}
-          suffix="歳"
-        />
-
-        <label className="flex flex-col gap-1 text-sm">
-          <span className="font-medium text-slate-700">職業</span>
-          <select
-            className="rounded border border-slate-300 px-3 py-2 focus:border-slate-500 focus:outline-none"
-            value={sheet.occupation}
-            onChange={(e) => set("occupation", e.target.value as Occupation)}
-          >
-            {(Object.keys(OCCUPATION_LABELS) as Occupation[]).map((key) => (
-              <option key={key} value={key}>
-                {OCCUPATION_LABELS[key]}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        <SelectField
-          label="世帯手取り年収"
-          value={sheet.householdNetIncome}
-          options={INCOME_OPTIONS}
-          onChange={(v) => set("householdNetIncome", v)}
-          format={formatCompactYen}
-          hint="配偶者がいれば合算した額"
-        />
-
-        <SelectField
-          label="年間の基本生活費"
-          value={sheet.annualLivingCost}
-          options={LIVING_COST_OPTIONS}
-          onChange={(v) => set("annualLivingCost", v)}
-          format={formatCompactYen}
-          hint="月30万円なら 360万円"
-        />
-
-        <SelectField
-          label="現在の貯金"
-          value={sheet.savings}
-          options={ASSET_OPTIONS}
-          onChange={(v) => set("savings", v)}
-          format={formatCompactYen}
-          hint="利回りがつかない現金"
-        />
-
-        <SelectField
-          label="現在の投資額"
-          value={sheet.investments}
-          options={ASSET_OPTIONS}
-          onChange={(v) => set("investments", v)}
-          format={formatCompactYen}
-          hint="利回りが適用される資産"
-        />
-
-        <div
-          className={
-            retirementAgeInvalid
-              ? "flex flex-col gap-2 rounded border border-amber-400 bg-amber-50 p-3"
-              : undefined
-          }
-        >
-          {retirementAgeInvalid && (
-            <p className="text-xs font-medium text-amber-700">
-              ⚠️ 現在の年齢より前になっています。この状態では給与収入が全期間0円として
-              試算されます。現在の年齢以上に修正してください
-            </p>
-          )}
-          <SelectField
-            label="リタイア予定年齢"
-            value={sheet.retirementAge}
-            options={RETIREMENT_AGE_OPTIONS}
-            onChange={(v) => set("retirementAge", v)}
-            suffix="歳"
-          />
-        </div>
-
-        <DerivedSummary sheet={sheet} />
-      </section>
-
-      <section className="flex flex-col gap-4 border-t border-slate-200 pt-6">
         <div>
           <h2 className="text-base font-bold text-slate-800">より詳しく（任意）</h2>
           <p className="mt-1 text-xs text-slate-500">

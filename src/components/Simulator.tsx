@@ -6,10 +6,11 @@ import { runAllScenarios } from "@/lib/lifeplan/scenarios";
 import { toRealTerms } from "@/lib/lifeplan/realTerms";
 import type { HearingSheet } from "@/lib/lifeplan/types";
 import { DEFAULT_SHEET, loadSheet, saveSheet } from "@/lib/storage";
+import { BasicInfoBar } from "./BasicInfoBar";
 import { CashflowChart } from "./CashflowChart";
 import { DepletionVerdict } from "./DepletionVerdict";
-import { HearingForm } from "./HearingForm";
 import { HearingModal } from "./HearingModal";
+import { OptionalDetailsForm } from "./OptionalDetailsForm";
 import SavedPlans from "./plans/SavedPlans";
 
 /**
@@ -98,7 +99,8 @@ export function Simulator() {
           DOM順・lg以上のカラム配置（フォーム左・結果右）は変えない
         */}
         <div className="order-2 flex flex-col gap-4 lg:order-1 lg:sticky lg:top-6 lg:self-start">
-          <HearingForm sheet={sheet} onChange={setSheet} />
+          <BasicInfoBar sheet={sheet} onChange={setSheet} />
+          <OptionalDetailsForm sheet={sheet} onChange={setSheet} />
           <button
             type="button"
             className="self-start text-xs text-slate-600 underline hover:text-slate-900"
