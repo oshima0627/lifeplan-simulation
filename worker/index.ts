@@ -2,6 +2,7 @@ import { handleResetRoute } from "./auth/reset";
 import { handleAuthRoute } from "./auth/routes";
 import { handleBillingRoute } from "./billing/routes";
 import { handleStripeWebhook } from "./billing/webhook";
+import { handlePlansRoute } from "./plans/routes";
 import type { AppEnv } from "./env";
 import { errorResponse, json } from "./http";
 
@@ -53,6 +54,9 @@ const worker = {
 
       const billingResponse = await handleBillingRoute(request, env, url);
       if (billingResponse) return billingResponse;
+
+      const plansResponse = await handlePlansRoute(request, env, url);
+      if (plansResponse) return plansResponse;
 
       const resetResponse = await handleResetRoute(request, env, url, ctx);
       if (resetResponse) return resetResponse;

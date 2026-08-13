@@ -1,7 +1,5 @@
-import { hashToken } from "../auth/session";
+import { currentUserId } from "../auth/current";
 import { checkIpRateLimit } from "../auth/routes";
-import { readCookie, SESSION_COOKIE } from "../cookies";
-import { findUserIdBySession } from "../db";
 import type { AppEnv } from "../env";
 import { errorResponse, json } from "../http";
 import { findSubscriptionByUser } from "./db";
@@ -16,13 +14,6 @@ import { getStripe } from "./stripe";
  * 正規の利用者が1日に何度も契約し直すことはないため、低めで足りる。
  */
 const BILLING_SESSION_DAILY_LIMIT = 20;
-
-/** ログイン中のユーザーIDを返す。未ログインなら null。 */
-async function currentUserId(request: Request, env: AppEnv): Promise<string | null> {
-  const token = readCookie(request, SESSION_COOKIE);
-  if (!token) return null;
-  return findUserIdBySession(env.DB, await hashToken(token));
-}
 
 /** 契約状態と今月の残り回数。画面はこれだけを見る。 */
 async function handleStatus(request: Request, env: AppEnv): Promise<Response> {
