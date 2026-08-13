@@ -22,6 +22,7 @@ export function SelectField({
   format,
   suffix,
   hint,
+  invalid,
 }: {
   label: string;
   value: number;
@@ -31,6 +32,8 @@ export function SelectField({
   format?: (v: number) => string;
   suffix?: string;
   hint?: string;
+  /** 真なら枠を琥珀色にし aria-invalid を立てる。文言は InputWarnings が持つ */
+  invalid?: boolean;
 }) {
   // label と select を紐づける。同じラベル名の項目が複数あっても衝突しないよう
   // React が採番するIDを使う（「第1子の年齢」「第2子の年齢」など）
@@ -45,7 +48,13 @@ export function SelectField({
       <span className="flex items-center gap-2">
         <select
           id={id}
-          className="w-full rounded border border-slate-300 px-3 py-2 tabular-nums focus:border-slate-500 focus:outline-none"
+          // 枠の色だけでは色覚特性によって伝わらない。支援技術にも同じことを伝える
+          aria-invalid={invalid ? true : undefined}
+          className={`w-full rounded border px-3 py-2 tabular-nums focus:outline-none ${
+            invalid
+              ? "border-amber-500 bg-amber-50 focus:border-amber-600"
+              : "border-slate-300 focus:border-slate-500"
+          }`}
           value={value}
           onChange={(e) => onChange(Number(e.target.value))}
         >
