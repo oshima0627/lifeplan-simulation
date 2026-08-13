@@ -248,21 +248,35 @@ describe("実質表示", () => {
 });
 
 describe("固定領域とスクロール領域の分離", () => {
-  it("任意項目はバーではなくスクロール領域にある", async () => {
+  it("入力欄は固定領域の外にある（固定領域はグラフと判定のためのもの）", async () => {
     localStorage.clear();
     render(<Simulator />);
     fireEvent.keyDown(document, { key: "Escape" });
-    // バーに載せてよいのは8項目まで。子供の追加ボタンはスクロール領域側
-    expect(await screen.findByRole("button", { name: "子供を追加" })).toBeInTheDocument();
 
-    // 存在チェックだけでは、退職金が BasicInfoBar の中に描画されていても
-    // 通ってしまう（最終レビュー指摘 F6）。画面に固定される領域（.sticky）の
-    // 外側にあることまで確認する。.sticky は Simulator.tsx が固定領域の
-    // ルートに付けているクラスで、sticky が効くための制約として
-    // コメント済み（祖先に overflow を足さないこと、等）の対象そのものでもある
-    const fixedArea = document.querySelector(".sticky");
+    const fixedArea = document.querySelector(".sticky") as HTMLElement;
     expect(fixedArea).not.toBeNull();
-    expect(within(fixedArea as HTMLElement).queryByLabelText("退職金")).not.toBeInTheDocument();
+    // 入力欄は左カラム側にある。固定領域の中には無い
+    expect(within(fixedArea).queryByLabelText("現在の年齢")).not.toBeInTheDocument();
+    expect(within(fixedArea).queryByLabelText("退職金")).not.toBeInTheDocument();
+    expect(await screen.findByLabelText("現在の年齢")).toBeInTheDocument();
     expect(screen.getByLabelText("退職金")).toBeInTheDocument();
+  });
+
+  it("警告行は固定領域の中にある（狭い画面で左カラムが消えても見えるように）", async () => {
+    localStorage.clear();
+    render(<Simulator />);
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    const fixedArea = document.querySelector(".sticky") as HTMLElement;
+    expect(within(fixedArea).getByRole("status")).toBeInTheDocument();
+  });
+
+  it("「入力する」ボタンでポップアップが開く", async () => {
+    localStorage.clear();
+    render(<Simulator />);
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    fireEvent.click(await screen.findByRole("button", { name: "入力する" }));
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
   });
 });
