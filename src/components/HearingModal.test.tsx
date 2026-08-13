@@ -112,6 +112,71 @@ describe("HearingModal", () => {
     fireEvent.click(screen.getByRole("button", { name: "閉じる" }));
     expect(onClose).toHaveBeenCalled();
   });
+
+  it("ステップ表示の段を押すとその段へ飛ぶ", () => {
+    render(<HearingModal sheet={BASE} onChange={() => {}} open onClose={() => {}} />);
+    fireEvent.click(screen.getByRole("button", { name: /老後/ }));
+    expect(screen.getByRole("dialog")).toHaveAccessibleName("老後");
+  });
+
+  it("aria-current=step が付くのはちょうど1つ", () => {
+    render(<HearingModal sheet={BASE} onChange={() => {}} open onClose={() => {}} />);
+    expect(document.querySelectorAll('[aria-current="step"]')).toHaveLength(1);
+  });
+
+  it("「この内容で見る」はどのステップにもあり、押すと閉じる", () => {
+    const onClose = vi.fn();
+    render(<HearingModal sheet={BASE} onChange={() => {}} open onClose={onClose} />);
+    fireEvent.click(screen.getByRole("button", { name: "この内容で見る" }));
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it("最後のステップにも「この内容で見る」がある", () => {
+    render(<HearingModal sheet={BASE} onChange={() => {}} open onClose={() => {}} />);
+    for (let i = 0; i < 5; i++) {
+      fireEvent.click(screen.getByRole("button", { name: "次へ" }));
+    }
+    expect(screen.getByRole("button", { name: "この内容で見る" })).toBeInTheDocument();
+  });
+});
+
+describe("フォーカスの扱い", () => {
+  it("Tab は最後の操作要素から最初へ回り込む", () => {
+    render(<HearingModal sheet={BASE} onChange={() => {}} open onClose={() => {}} />);
+    const dialog = screen.getByRole("dialog");
+    const focusables = dialog.querySelectorAll<HTMLElement>("button, select, input");
+    const first = focusables[0];
+    const last = focusables[focusables.length - 1];
+
+    last.focus();
+    fireEvent.keyDown(document, { key: "Tab" });
+    expect(document.activeElement).toBe(first);
+  });
+
+  it("Shift+Tab は最初の操作要素から最後へ回り込む", () => {
+    render(<HearingModal sheet={BASE} onChange={() => {}} open onClose={() => {}} />);
+    const dialog = screen.getByRole("dialog");
+    const focusables = dialog.querySelectorAll<HTMLElement>("button, select, input");
+    const first = focusables[0];
+    const last = focusables[focusables.length - 1];
+
+    first.focus();
+    fireEvent.keyDown(document, { key: "Tab", shiftKey: true });
+    expect(document.activeElement).toBe(last);
+  });
+
+  it("閉じるとフォーカスが開く前の要素へ戻る", () => {
+    render(<button type="button">呼び出し元</button>);
+    const opener = screen.getByRole("button", { name: "呼び出し元" });
+    opener.focus();
+
+    const { rerender } = render(
+      <HearingModal sheet={BASE} onChange={() => {}} open onClose={() => {}} />,
+    );
+    rerender(<HearingModal sheet={BASE} onChange={() => {}} open={false} onClose={() => {}} />);
+
+    expect(document.activeElement).toBe(opener);
+  });
 });
 
 describe("黙って間違う条件の警告（Finding C1）", () => {
