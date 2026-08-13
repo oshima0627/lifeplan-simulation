@@ -801,7 +801,7 @@ git add src/lib/lifeplan/verdict.ts src/lib/lifeplan/verdict.test.ts src/compone
 - Create: `src/components/OptionalDetailsForm.test.tsx`（`HearingForm.test.tsx` を移したもの）
 - Delete: `src/components/HearingForm.tsx`
 - Delete: `src/components/HearingForm.test.tsx`
-- Modify: `src/components/Simulator.tsx`（import と JSX のタグ名だけ）
+- Modify: `src/components/Simulator.tsx`（タグ名の差し替えと `BasicInfoBar` の配線）
 
 **Interfaces:**
 - Produces:
@@ -814,7 +814,9 @@ git add src/lib/lifeplan/verdict.ts src/lib/lifeplan/verdict.test.ts src/compone
 
 **なぜ改名するのか:** 基本情報を持たない「HearingForm」は名前と中身が食い違う。読む人が「基本情報はここにあるはず」と探して見つからない。
 
-**この時点ではまだレイアウトを変えない。** `Simulator` はタグ名を差し替えるだけ。レイアウトの組み替えは Task 5 で行う。
+**この時点ではまだレイアウトを変えない。** `Simulator` は左カラムの中身を「`BasicInfoBar` ＋ `OptionalDetailsForm`」に差し替えるだけで、2カラムのままにする。レイアウトの組み替えは Task 5 で行う。
+
+**なぜここで `BasicInfoBar` を配線するのか:** 基本情報がフォームから消えるので、配線しないと `Simulator.test.tsx` が「現在の年齢が見つからない」で落ちる。**テストが赤いままコミットするタスクを作らない。** 年間収支が `DerivedSummary` とバッジで二重に出るが、これは Task 5 で解消する一時的な状態。
 
 - [ ] **Step 1: ファイルを git mv で移す**
 
@@ -865,17 +867,28 @@ Expected: FAIL（追加した1件が「現在の年齢が見つかる」で落�
  */
 ```
 
-- [ ] **Step 5: `Simulator.tsx` のタグ名を差し替える**
+- [ ] **Step 5: `Simulator.tsx` に `BasicInfoBar` を配線する**
 
-`import { HearingForm } from "./HearingForm";` を
-`import { OptionalDetailsForm } from "./OptionalDetailsForm";` にし、
-`<HearingForm sheet={sheet} onChange={setSheet} />` を
-`<OptionalDetailsForm sheet={sheet} onChange={setSheet} />` にする。
+import を差し替える:
+
+```tsx
+import { BasicInfoBar } from "./BasicInfoBar";
+import { OptionalDetailsForm } from "./OptionalDetailsForm";
+```
+
+（`import { HearingForm } from "./HearingForm";` は削除する）
+
+左カラムの `<HearingForm sheet={sheet} onChange={setSheet} />` を次の2行に置き換える。**2カラムのレイアウトはこの時点では変えない。**
+
+```tsx
+          <BasicInfoBar sheet={sheet} onChange={setSheet} />
+          <OptionalDetailsForm sheet={sheet} onChange={setSheet} />
+```
 
 - [ ] **Step 6: テストを実行する**
 
 Run: `npm test`
-Expected: `OptionalDetailsForm.test.tsx` は PASS。**`Simulator.test.tsx` は落ちてよい**（`現在の年齢` が画面から消えるため）。次の Task 5 で直す
+Expected: PASS（全ファイル）。落ちる場合、`現在の年齢` が二重に見つかっているならモーダルを閉じていないテストが原因。該当テストの `render(<Simulator />);` の直後に `fireEvent.keyDown(document, { key: "Escape" });` を足す
 
 - [ ] **Step 7: `npm run typecheck` を実行して未使用 import が残っていないことを確認する**
 
@@ -962,7 +975,7 @@ Expected: **一致なし。** 一致があれば sticky はエラーも出さず
 
 - [ ] **Step 5: `Simulator.tsx` の JSX を組み替える**
 
-`import { HearingForm }`／`import { DerivedSummary }` 周辺の import に `BasicInfoBar` と `VerdictSummary` を足し、`return` の中身（78〜138行目）を次にする。**`useState` / `useEffect` / `useMemo` は一切変えない。**
+import に `VerdictSummary` を足し（`BasicInfoBar` は Task 4 で追加済み）、`return` の中身を次にする。**`useState` / `useEffect` / `useMemo` は一切変えない。**
 
 ```tsx
   return (
