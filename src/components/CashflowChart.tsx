@@ -62,7 +62,9 @@ export function CashflowChart({ result }: { result: LifeplanResult }) {
     <div
       role="img"
       aria-label={ariaLabel}
-      className="h-[360px] w-full rounded-lg border border-slate-200 bg-white p-4"
+      // ⚠️ 固定領域に入るので、画面高を超えないよう vh で縮める。
+      // 画面高を超えた sticky は下端が永久に見えなくなる（設計書 §4.2）
+      className="h-[min(360px,40vh)] w-full rounded-lg border border-slate-200 bg-white p-4"
     >
       <ResponsiveContainer width="100%" height="100%">
         <LineChart data={data} margin={{ top: 8, right: 8, bottom: 8, left: 8 }}>

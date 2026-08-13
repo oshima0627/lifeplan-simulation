@@ -40,6 +40,8 @@ describe("Simulator の保存・復元・リセット", () => {
     saveSheet(saved);
 
     render(<Simulator />);
+    // モーダルが自動で開くとラベルが二重になるので、先に閉じる
+    fireEvent.keyDown(document, { key: "Escape" });
 
     const input = await screen.findByLabelText(/^現在の年齢/);
     expect(input).toHaveValue("52");
@@ -63,6 +65,8 @@ describe("Simulator の保存・復元・リセット", () => {
     saveSheet(saved);
 
     render(<Simulator />);
+    // モーダルが自動で開くとラベルが二重になるので、先に閉じる
+    fireEvent.keyDown(document, { key: "Escape" });
     const input = await screen.findByLabelText(/^現在の年齢/);
     // 復元されていることを先に確認してから、リセットの効果を見る
     expect(input).toHaveValue("60");
@@ -115,6 +119,8 @@ describe("初回訪問のモーダル", () => {
       }),
     );
     render(<Simulator />);
+    // モーダルが自動で開くとラベルが二重になるので、先に閉じる
+    fireEvent.keyDown(document, { key: "Escape" });
     fireEvent.click(await screen.findByText("入力をやり直す"));
     expect(screen.getByRole("dialog")).toBeInTheDocument();
   });
@@ -233,5 +239,16 @@ describe("実質表示", () => {
     expect(within(card).queryByText(/3\.2億円/)).not.toBeInTheDocument();
     // 名目値でもないこと
     expect(within(card).queryByText(/11\.7億円/)).not.toBeInTheDocument();
+  });
+});
+
+describe("固定領域とスクロール領域の分離", () => {
+  it("任意項目はバーではなくスクロール領域にある", async () => {
+    localStorage.clear();
+    render(<Simulator />);
+    fireEvent.keyDown(document, { key: "Escape" });
+    // バーに載せてよいのは8項目まで。子供の追加ボタンはスクロール領域側
+    expect(await screen.findByRole("button", { name: "子供を追加" })).toBeInTheDocument();
+    expect(screen.queryByLabelText("退職金")).toBeInTheDocument();
   });
 });
