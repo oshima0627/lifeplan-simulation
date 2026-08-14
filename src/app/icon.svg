@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <!--
+    ファビコン。Next.js App Router が src/app/icon.svg を見つけて
+    <link rel="icon"> を自動で出すので、layout.tsx に書く必要はない。
+
+    マークは Lucide の chart-spline（ISC License, Copyright (c) 2024 Lucide Contributors）。
+    24pxグリッドで作図されたアイコンを translate(8,8) scale(2) で 64 のマス目に載せている。
+
+    ⚠️ stroke-width を 2 から 3 に上げてある。scale(2) 後に 6単位となり、
+    16px 表示で 1.5px になる。元の 2 のままだと 1px まで痩せて線が消える。
+    細くしないこと。
+
+    ⚠️ 自前の濃紺の角丸四角を背景に持たせている。ブラウザのタブは明るい場合も
+    暗い場合もあるので、透過にすると片方で見えなくなる。
+  -->
+  <rect width="64" height="64" rx="14" fill="#0f172a"/>
+  <g transform="translate(8,8) scale(2)" fill="none" stroke="#ffffff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M3 3v16a2 2 0 0 0 2 2h16"/>
+    <path d="M7 16c.5-2 1.5-7 4-7 2 0 2 3 4 3 2.5 0 4.5-5 5-7"/>
+  </g>
+</svg>
